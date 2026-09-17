@@ -19,36 +19,61 @@ jobs:
          python -m pip install --upgrade pip
          pip install poetry
          sudo apt-get install libblas3 liblapack3 liblapack-dev libblas-dev gfortran libatlas-base-dev
-     - name: Build and publish
+     - name: Build wheel
        run: |
-         export PSACC_VERSION=$(git describe --tags --abbrev=0)
+         PSACC_VERSION=$(git describe --tags --abbrev=0)
+         echo "PSACC_VERSION=${PSACC_VERSION}" >> $GITHUB_ENV
          poetry version ${PSACC_VERSION}
          poetry build
-         poetry publish --username __token__ --password ${{ secrets.PYPI_TOKEN }}
-         mv dist/psa_car_controller-${PSACC_VERSION:1}-py3-none-any.whl dist/psa_car_controller-0.0.0-py3-none-any.whl
+     - name: Publish to pypi
+       # a fork has no pypi token, the docker image is still built and published
+       if: ${{ secrets.PYPI_TOKEN != '' }}
+       run: poetry publish --username __token__ --password ${{ secrets.PYPI_TOKEN }}
+     - name: Rename the wheel for the docker build
+       run: mv dist/psa_car_controller-${PSACC_VERSION:1}-py3-none-any.whl dist/psa_car_controller-0.0.0-py3-none-any.whl
      - uses: actions/upload-artifact@v4
        with:
          name: wheel-package
          path: dist/psa_car_controller-0.0.0-py3-none-any.whl
   push_to_registry:
     needs: create_release
-    name: Push Docker image to Docker Hub
+    name: Push Docker image to GHCR
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      # the psacc-ha repository can only be updated with the token of its owner
+      has_gh_pat: ${{ secrets.GH_PAT != '' }}
     steps:
       - name: Prepare
         id: prep
+        env:
+          # docker hub is only used when the credentials are configured, ghcr is always used
+          DOCKER_HUB_IMAGE: ${{ secrets.DOCKER_USERNAME != '' && 'flobz/psa_car_controller' || '' }}
         run: |
-          DOCKER_IMAGE=flobz/psa_car_controller
+          GHCR_IMAGE=ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          IMAGES="${GHCR_IMAGE}"
+          if [[ -n "${DOCKER_HUB_IMAGE}" ]]; then
+            IMAGES="${IMAGES} ${DOCKER_HUB_IMAGE}"
+          fi
           VERSION=edge
           if [[ $GITHUB_REF == refs/tags/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/}
             MINOR_VERSION=${VERSION%.*}
             MAJOR=${MINOR_VERSION%.*}
-            TAGS="${DOCKER_IMAGE}:${VERSION},${DOCKER_IMAGE}:${MINOR_VERSION},${DOCKER_IMAGE}:${MAJOR},${DOCKER_IMAGE}:latest"
+            VERSION_TAGS="${VERSION} ${MINOR_VERSION} ${MAJOR} latest"
           else
-            TAGS="${DOCKER_IMAGE}:${VERSION}"
+            VERSION_TAGS="${VERSION}"
           fi
-          echo ::set-output name=tags::${TAGS}
+          TAGS=""
+          for image in ${IMAGES}; do
+            for tag in ${VERSION_TAGS}; do
+              TAGS="${TAGS}${TAGS:+,}${image}:${tag}"
+            done
+          done
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "push_to_docker_hub=${DOCKER_HUB_IMAGE:+true}" >> $GITHUB_OUTPUT
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
         with:
@@ -61,9 +86,16 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: wheel-package
-          path: dist/psa_car_controller-0.0.0-py3-none-any.whl
+          path: dist
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Login to DockerHub
-        uses: docker/login-action@v4 
+        if: steps.prep.outputs.push_to_docker_hub == 'true'
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
@@ -75,6 +107,9 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.prep.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           platforms: linux/amd64,linux/arm64,linux/arm/v7
       -
         name: Image digest
@@ -84,7 +119,8 @@ jobs:
     needs: push_to_registry
     name: Update psacc-ha version
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, 'b')
+    if: needs.push_to_registry.outputs.has_gh_pat == 'true' && github.event_name == 'push' &&
+        startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, 'b')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/update-ha-config
@@ -98,7 +134,8 @@ jobs:
     needs: push_to_registry
     name: Update psacc-ha beta version
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'b')
+    if: needs.push_to_registry.outputs.has_gh_pat == 'true' && github.event_name == 'push' &&
+        startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'b')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/update-ha-config
