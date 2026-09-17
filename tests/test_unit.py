@@ -160,6 +160,14 @@ class TestUnit(unittest.TestCase):
                            None)
         self.assertEqual(db_record_position_arg, expected_result)
 
+    def test_get_vehicles_with_empty_api_answer(self):
+        """An empty api answer isn't an ApiException, it deserializes to None."""
+        myp = PSAClient.load_config(DATA_DIR + "config.json")
+        myp.vehicles_list = Cars([Car("VR3UHZKX", "vid", "Peugeot")])
+        myp.api = MagicMock()
+        myp.api.return_value.get_vehicles_by_device.return_value = None
+        self.assertEqual(myp.vehicles_list, myp.get_vehicles())
+
     @patch("psa_car_controller.psacc.repository.db.Database.record_position")
     def test_record_info_skip_not_updated_position(self, mock_db):
         """A position the api didn't update must not be recorded again under a fresh date,

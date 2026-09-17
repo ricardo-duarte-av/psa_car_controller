@@ -140,7 +140,12 @@ class PSAClient:
     def get_vehicles(self):
         try:
             res = self.api().get_vehicles_by_device()
-            for vehicle in res.embedded.vehicles:
+            # an empty answer isn't an ApiException, it just gives nothing to deserialize
+            vehicles = getattr(getattr(res, "embedded", None), "vehicles", None)
+            if vehicles is None:
+                logger.error("get_vehicles: no vehicle in the api answer, keeping the known cars")
+                return self.vehicles_list
+            for vehicle in vehicles:
                 self.vehicles_list.add(Car(vehicle.vin, vehicle.id, vehicle.brand, vehicle.label))
             self.vehicles_list.save_cars()
         except (ApiException, HTTPError):
