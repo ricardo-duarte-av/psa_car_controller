@@ -27,8 +27,11 @@ jobs:
          poetry build
      - name: Publish to pypi
        # a fork has no pypi token, the docker image is still built and published
-       if: ${{ secrets.PYPI_TOKEN != '' }}
-       run: poetry publish --username __token__ --password ${{ secrets.PYPI_TOKEN }}
+       # the secrets context isn't available in if, it has to go through env
+       env:
+         PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+       if: ${{ env.PYPI_TOKEN != '' }}
+       run: poetry publish --username __token__ --password "${PYPI_TOKEN}"
      - name: Rename the wheel for the docker build
        run: mv dist/psa_car_controller-${PSACC_VERSION:1}-py3-none-any.whl dist/psa_car_controller-0.0.0-py3-none-any.whl
      - uses: actions/upload-artifact@v4
