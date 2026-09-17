@@ -160,6 +160,39 @@ class TestUnit(unittest.TestCase):
                            None)
         self.assertEqual(db_record_position_arg, expected_result)
 
+    @patch("psa_car_controller.psacc.repository.db.Database.record_position")
+    def test_record_info_skip_not_updated_position(self, mock_db):
+        """A position the api didn't update must not be recorded again under a fresh date,
+        it would build a trip with a route the car never drove."""
+        api = ApiClient()
+        status: psa.connected_car_api.models.status.Status = api._ApiClient__deserialize(ELECTRIC_CAR_STATUS, "Status")
+        get_new_test_db()
+        car = self.vehicule_list[0]
+        car.status = status
+        status.last_position.properties.updated_at = datetime(2022, 3, 26, 11, 2, 54, tzinfo=tzutc())
+        myp = PSAClient.load_config(DATA_DIR + "config.json")
+        myp.record_info(car)
+        myp.record_info(car)
+        self.assertEqual(1, mock_db.call_count)
+        # an updated position is recorded again
+        status.last_position.properties.updated_at = datetime(2022, 3, 26, 12, 2, 54, tzinfo=tzutc())
+        myp.record_info(car)
+        self.assertEqual(2, mock_db.call_count)
+
+    @patch("psa_car_controller.psacc.repository.db.Database.record_position")
+    def test_record_info_without_position_date(self, mock_db):
+        """When the api gives no position date there is nothing to compare, keep recording."""
+        api = ApiClient()
+        status: psa.connected_car_api.models.status.Status = api._ApiClient__deserialize(ELECTRIC_CAR_STATUS, "Status")
+        get_new_test_db()
+        car = self.vehicule_list[0]
+        car.status = status
+        self.assertIsNone(status.last_position.properties.updated_at)
+        myp = PSAClient.load_config(DATA_DIR + "config.json")
+        myp.record_info(car)
+        myp.record_info(car)
+        self.assertEqual(2, mock_db.call_count)
+
     @patch("psa_car_controller.psacc.repository.db.Database.record_battery_soh")
     @patch("psa_car_controller.psacc.repository.db.Database.record_position")
     def test_electric_record_info_v2(self, mock_db, moock_soh):

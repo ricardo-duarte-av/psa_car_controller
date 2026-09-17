@@ -60,6 +60,7 @@ class PSAClient:
         self.api_config.api_key['x-introspect-realm'] = self.realm
         self.remote_token_last_update = None
         self._record_enabled = False
+        self._last_position_date = {}
         self.weather_api = weather_api
         self.brand = brand
         self.info_callback = []
@@ -179,6 +180,16 @@ class PSAClient:
     def set_record(self, value: bool):
         self._record_enabled = value
 
+    def _is_position_updated(self, vin, position_date) -> bool:
+        """Only record a position the api actually updated.
+
+        A stale position recorded under a fresh timestamp makes the car look like it jumped,
+        which builds trips with a route it never drove.
+        """
+        if position_date is None:  # api gives no position date, nothing to compare
+            return True
+        return self._last_position_date.get(vin, None) != position_date
+
     def record_info(self, car: Car):  # pylint: disable=too-many-locals
         mileage = car.status.timed_odometer.mileage
         level = car.status.get_energy('Electric').level
@@ -192,7 +203,8 @@ class PSAClient:
         longitude = car.status.last_position.geometry.coordinates[0]
         latitude = car.status.last_position.geometry.coordinates[1]
         altitude = car.status.last_position.geometry.coordinates[2]
-        date = car.status.last_position.properties.updated_at
+        position_date = car.status.last_position.properties.updated_at
+        date = position_date
         if date is None or date < datetime.now(timezone.utc) - timedelta(days=1):  # if position isn't updated
             date = charge_date
 
@@ -201,8 +213,12 @@ class PSAClient:
         logger.debug("vin:%s longitude:%s latitude:%s date:%s mileage:%s level:%s charge_date:%s level_fuel:"
                      "%s moving:%s temp:%s", car.vin, longitude, latitude, date, mileage, level, charge_date,
                      level_fuel, moving, temp)
-        Database.record_position(self.weather_api, car.vin, mileage, latitude, longitude, altitude, date, level,
-                                 level_fuel, moving, temp)
+        if self._is_position_updated(car.vin, position_date):
+            Database.record_position(self.weather_api, car.vin, mileage, latitude, longitude, altitude, date, level,
+                                     level_fuel, moving, temp)
+            self._last_position_date[car.vin] = position_date
+        else:
+            logger.debug("position of %s wasn't updated since %s, not recorded", car.vin, position_date)
         self.abrp.call(car, Database.get_last_temp(car.vin))
         if car.has_battery():
             electric_energy_status = car.status.get_energy('Electric')
