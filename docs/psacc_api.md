@@ -70,3 +70,45 @@ These links will work only if PSACC is on your computer, if it isn't please repl
 17. Get the vehicle trips:
    
    http://localhost:5000/vehicles/trips
+
+18. Get the result of a command
+
+    Every command (charge_now, preconditioning, wakeup, horn, lights, lock_door, charge_hour) answers with the
+    command it queued, not with what the car did:
+
+    ```json
+    {"correlation_id": "e4c5...1230", "vin": "YOURVIN", "action": "Doors", "status": "pending",
+     "return_code": null, "reason": null, "message": "command sent, waiting for the car answer",
+     "sent_at": "2026-09-17T20:54:39+00:00", "updated_at": "2026-09-17T20:54:39+00:00"}
+    ```
+
+    The car answers later on mqtt, so either poll the correlation id:
+
+    http://localhost:5000/command/CORRELATION_ID
+
+    or ask the command endpoint to wait for the answer (up to 30 seconds):
+
+    http://localhost:5000/lock_door/YOURVIN/1?wait=10
+
+    `status` is then `success` (`message`: "command accepted by the car") or `failed`, with `message` telling why,
+    for example "PSA refused: this service isn't available for this car".
+
+19. Get the last command results
+
+    http://localhost:5000/commands or http://localhost:5000/commands?vin=YOURVIN
+
+20. Follow the car events in real time (server sent events)
+
+    http://localhost:5000/events
+
+    The stream carries the mqtt events of the car (`vehicle`) and the answers to the commands
+    (`command_result`), which avoids polling the car state:
+
+    ```
+    event: vehicle
+    data: {"type": "vehicle", "date": "2026-09-17T20:54:39+00:00", "data": {"vin": "YOURVIN",
+           "battery_level": 64, "autonomy": 22, "charging": true, "charging_rate": 0, "remaining_time": 635,
+           "cable_plugged": true, "preconditioning": false, "raw": {...}}}
+    ```
+
+    Example with curl: `curl -N http://localhost:5000/events`

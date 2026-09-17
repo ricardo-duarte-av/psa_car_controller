@@ -13,10 +13,13 @@ class MQTTRequest:
     def __init__(self, topic, vin, req_parameters, customer_id):
         self.customer_id = customer_id
         self.topic = MQTT_REQ_TOPIC + self.customer_id + topic
+        self.action = topic.strip("/")
         self.vin = vin
         self.req_parameters = req_parameters
         self.date = datetime.now()
         self.data = {}
+        self.correlation_id = None
+        self.retried = False
 
     def get_message_to_json(self, remote_access_token):
         return json.dumps(self.get_message(remote_access_token))
@@ -24,8 +27,9 @@ class MQTTRequest:
     def get_message(self, remote_access_token):
         date = datetime.utcnow()
         date_str = date.strftime(PSA_DATE_FORMAT)
+        self.correlation_id = self.__gen_correlation_id(date)
         self.data = {"access_token": remote_access_token, "customer_id": self.customer_id,
-                     "correlation_id": self.__gen_correlation_id(date), "req_date": date_str, "vin": self.vin,
+                     "correlation_id": self.correlation_id, "req_date": date_str, "vin": self.vin,
                      "req_parameters": self.req_parameters}
         return self.data
 

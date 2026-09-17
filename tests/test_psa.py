@@ -9,8 +9,11 @@ import unittest
 
 from paho.mqtt.client import MQTTMessage
 
-from psa_car_controller.psa.RemoteClient import MQTT_EVENT_TOPIC
+from psa_car_controller.psa.RemoteClient import MQTT_EVENT_TOPIC, MQTT_RESP_TOPIC
+from psa_car_controller.psa.remote_events import FAILED, PENDING, SUCCESS
 from tests.utils import get_rc
+
+import json
 
 message_without_precond = b'{"date":"2022-03-30T12:00:52Z","etat_res_elec":0,"precond_state":{},"charging_state":{"program":{' \
                           b'"hour":22,"minute":30},"available":1,"remaining_time":0,"rate":0,"cable_detected":1,"soc_batt":76,' \
@@ -60,3 +63,87 @@ class TestUnit(unittest.TestCase):
         msg = MQTTMessage(topic=MQTT_EVENT_TOPIC.encode("utf-8"))
         msg.payload = message_without_charge_info
         remote_client._on_mqtt_message(None, None, msg)
+
+
+class TestRemoteCommand(unittest.TestCase):
+    """Command results and the 400 handling."""
+
+    @staticmethod
+    def get_response_message(payload):
+        msg = MQTTMessage(topic=MQTT_RESP_TOPIC.encode("utf-8"))
+        msg.payload = payload
+        return msg
+
+    def get_remote_client(self):
+        remote_client = get_rc()
+        remote_client.account_info.get_mqtt_customer_id = MagicMock(return_value="cid")
+        remote_client.mqtt_client = MagicMock()
+        remote_client._refresh_remote_token = MagicMock(return_value=True)
+        remote_client.remoteCredentials = MagicMock()
+        remote_client.remoteCredentials.access_token = "token"
+        return remote_client
+
+    def send_command(self, remote_client):
+        return remote_client.lights("myvin", 10)
+
+    def test_command_result_success(self):
+        # GIVEN a sent command
+        remote_client = self.get_remote_client()
+        result = self.send_command(remote_client)
+        self.assertEqual(PENDING, result.status)
+        # WHEN the car answers
+        payload = json.dumps({"return_code": "0", "correlation_id": result.correlation_id}).encode("utf-8")
+        remote_client._on_mqtt_message(None, None, self.get_response_message(payload))
+        # THEN the result is exposed
+        self.assertEqual(SUCCESS, result.status)
+        self.assertIs(result, remote_client.get_command_result(result.correlation_id))
+
+    def test_refusal_is_not_retried(self):
+        # GIVEN a sent command
+        remote_client = self.get_remote_client()
+        result = self.send_command(remote_client)
+        remote_client.mqtt_client.publish.reset_mock()
+        # WHEN psa refuses it with a 400
+        payload = json.dumps({"return_code": "400", "reason": "no.matching.service.key",
+                              "correlation_id": result.correlation_id}).encode("utf-8")
+        remote_client._on_mqtt_message(None, None, self.get_response_message(payload))
+        # THEN it isn't sent again and the refusal is reported
+        remote_client.mqtt_client.publish.assert_not_called()
+        self.assertEqual(FAILED, result.status)
+        self.assertIn("isn't available for this car", result.message)
+        self.assertIsNone(remote_client.last_request)
+
+    def test_expired_token_is_retried_once(self):
+        # GIVEN a sent command
+        remote_client = self.get_remote_client()
+        result = self.send_command(remote_client)
+        remote_client.mqtt_client.publish.reset_mock()
+        payload = json.dumps({"return_code": "400", "correlation_id": result.correlation_id}).encode("utf-8")
+        # WHEN a 400 without a refusal reason comes back
+        remote_client._on_mqtt_message(None, None, self.get_response_message(payload))
+        # THEN the command is sent again, and the result follows the new correlation id
+        remote_client.mqtt_client.publish.assert_called_once()
+        self.assertEqual(PENDING, result.status)
+        self.assertIs(result, remote_client.get_command_result(result.correlation_id))
+        # WHEN a second 400 comes back
+        remote_client.mqtt_client.publish.reset_mock()
+        payload = json.dumps({"return_code": "400", "correlation_id": result.correlation_id}).encode("utf-8")
+        remote_client._on_mqtt_message(None, None, self.get_response_message(payload))
+        # THEN it isn't sent a third time
+        remote_client.mqtt_client.publish.assert_not_called()
+        self.assertEqual(FAILED, result.status)
+
+    def test_vehicle_event_is_broadcast(self):
+        # GIVEN a subscriber to the event stream
+        remote_client = get_rc()
+        queue = remote_client.event_broker.subscribe()
+        # WHEN a vehicle event is received
+        msg = MQTTMessage(topic=MQTT_EVENT_TOPIC.encode("utf-8"))
+        msg.payload = message_without_precond
+        remote_client._on_mqtt_message(None, None, msg)
+        # THEN it's broadcast
+        event = queue.get_nowait()
+        self.assertEqual("vehicle", event["type"])
+        self.assertEqual(76, event["data"]["battery_level"])
+        self.assertTrue(event["data"]["cable_plugged"])
+        self.assertFalse(event["data"]["charging"])

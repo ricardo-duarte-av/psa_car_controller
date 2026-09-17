@@ -17,6 +17,8 @@ from psa_car_controller.psa.mqtt_request import MQTTRequest
 from psa_car_controller.psa.oauth import OpenIdCredentialManager
 from psa_car_controller.common.utils import RateLimitException, rate_limit, parse_hour, TIMEOUT_IN_S
 from psa_car_controller.psa.otp.otp import ConfigException, save_otp, load_otp
+from psa_car_controller.psa.remote_events import CommandRegistry, CommandResult, EventBroker, describe_refusal, \
+    is_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,8 @@ class RemoteClient:
             "User-Agent": "okhttp/4.8.0",
         }
         self.last_request = None
+        self.command_registry = CommandRegistry()
+        self.event_broker = EventBroker()
         self.mqtt_client = None
         self.otp = None
         self._lock = threading.Lock()
@@ -72,27 +76,89 @@ class RemoteClient:
             data = json.loads(msg.payload)
             charge_info = None
             if msg.topic.startswith(MQTT_RESP_TOPIC):
-                if "return_code" not in data:
-                    logger.debug("mqtt msg hasn't return code")
-                elif data["return_code"] == "400":
-                    self._refresh_remote_token(force=True)
-                    if self.last_request:
-                        logger.warning("last request is send again, token was expired")
-                        last_request = self.last_request
-                        self.last_request = None
-                        self.publish(last_request, store=False)
-                    else:
-                        logger.error("Last request might have been send twice without success")
-                elif data["return_code"] != "0":
-                    logger.error('mqtt error %s : %s', data["return_code"], data.get("reason", "?"))
+                self._handle_response(data)
             elif msg.topic.startswith(MQTT_EVENT_TOPIC):
                 charge_info = data["charging_state"]
                 programs = data["precond_state"].get("programs", None)
                 if programs:
                     self.precond_programs[data["vin"]] = data["precond_state"]["programs"]
+                self.event_broker.publish("vehicle", self._format_vehicle_event(data))
             self._fix_not_updated_api(charge_info, data["vin"])
         except KeyError:
             logger.exception("on_mqtt_message:")
+
+    def _handle_response(self, data):
+        result = self._get_command_result(data)
+        if "return_code" not in data:
+            logger.debug("mqtt msg hasn't return code")
+            return
+        return_code = data["return_code"]
+        reason = data.get("reason", None)
+        if return_code == "400":
+            self._handle_bad_request(result, reason)
+        else:
+            if return_code != "0":
+                logger.error('mqtt error %s : %s', return_code, reason or "?")
+            elif self.last_request is not None and result is not None \
+                    and self.last_request.correlation_id == result.correlation_id:
+                self.last_request = None
+            if result is not None:
+                result.set_result(return_code, reason)
+        if result is not None:
+            self.event_broker.publish("command_result", result.to_dict())
+
+    def _handle_bad_request(self, result: CommandResult, reason):
+        """Handle a 400 answer.
+
+        A 400 doesn't always mean the remote token expired: PSA also answers 400 when it refuses
+        the command. Sending those again only loops and burns the token refresh budget, so a
+        refusal is reported and a resend is attempted at most once per request.
+        """
+        last_request = self.last_request
+        self.last_request = None
+        if is_refusal(reason):
+            logger.error("command refused by PSA: %s", describe_refusal(reason, "400"))
+        elif last_request is None:
+            logger.error("mqtt error 400 (%s), no request to send again", reason or "?")
+        elif last_request.retried:
+            logger.error("command already sent again after a 400 (%s), giving up", reason or "?")
+        else:
+            logger.warning("last request is send again, token was expired")
+            last_request.retried = True
+            if self._refresh_remote_token(force=True):
+                self.publish(last_request, result=result)
+            elif result is not None:
+                result.set_failed("can't refresh the remote token, command not sent", reason, "400")
+            return
+        if result is not None:
+            result.set_result("400", reason)
+
+    def _get_command_result(self, data) -> CommandResult:
+        correlation_id = data.get("correlation_id", None)
+        result = None
+        if correlation_id is not None:
+            result = self.command_registry.get(correlation_id)
+        if result is None:
+            # some answers come back without a correlation id, attach them to the waiting command
+            result = self.command_registry.get_last_pending()
+            if result is not None:
+                logger.debug("answer without known correlation id, attached to %s", result.action)
+        return result
+
+    @staticmethod
+    def _format_vehicle_event(data):
+        charging = data.get("charging_state", None) or {}
+        precond = data.get("precond_state", None) or {}
+        return {"vin": data.get("vin", None),
+                "date": data.get("date", None),
+                "battery_level": charging.get("soc_batt", None),
+                "autonomy": charging.get("autonomy_zev", None),
+                "charging": charging.get("remaining_time", 0) != 0 or charging.get("rate", 0) != 0,
+                "charging_rate": charging.get("rate", None),
+                "remaining_time": charging.get("remaining_time", None),
+                "cable_plugged": bool(charging.get("cable_detected", 0)),
+                "preconditioning": bool(precond.get("asap", 0)),
+                "raw": data}
 
     def _fix_not_updated_api(self, charge_info, vin):
         if charge_info is not None and (charge_info.get('remaining_time', 0) != 0 or charge_info.get('rate', 0) != 0):
@@ -153,19 +219,34 @@ class RemoteClient:
     def veh_charge_request(self, vin, hour, minute, charge_type):
         msg = self.mqtt_request(vin, {"program": {"hour": hour, "minute": minute}, "type": charge_type}, "/VehCharge")
         logger.info("veh_charge_request: %s", msg)
-        self.publish(msg)
-        return msg
+        return self.publish(msg)
 
-    def publish(self, mqtt_request: MQTTRequest, store=True) -> bool:
+    def publish(self, mqtt_request: MQTTRequest, store=True, result: CommandResult = None) -> CommandResult:
+        """Send a command to the car.
+
+        The answer comes back later on mqtt: the returned CommandResult is the handle to it,
+        it starts as pending and is filled by _handle_response. None is returned when the
+        command couldn't even be sent.
+        """
         if not self._refresh_remote_token():
             logger.error("Can't publish %s: remote token refresh failed", mqtt_request.topic)
-            return False
+            if result is not None:
+                result.set_failed("can't refresh the remote token, command not sent")
+            return result
         message = mqtt_request.get_message_to_json(self.remoteCredentials.access_token)
         logger.debug("mqtt publish: %s %s", mqtt_request.topic, message)
+        if result is None:
+            result = self.command_registry.register(mqtt_request.correlation_id, mqtt_request.vin,
+                                                    mqtt_request.action)
+        else:  # resent request, it got a new correlation id
+            self.command_registry.relink(mqtt_request.correlation_id, result)
         self.mqtt_client.publish(mqtt_request.topic, message)
         if store:
             self.last_request = mqtt_request
-        return True
+        return result
+
+    def get_command_result(self, correlation_id) -> CommandResult:
+        return self.command_registry.get(correlation_id)
 
     def mqtt_request(self, vin, req_parameters, topic):
         return MQTTRequest(topic, vin, req_parameters, self.account_info.get_mqtt_customer_id())
@@ -244,20 +325,19 @@ class RemoteClient:
     def horn(self, vin, count):
         msg = self.mqtt_request(vin, {"nb_horn": count, "action": "activate"}, "/Horn")
         logger.info(msg)
-        self.mqtt_client.publish(msg)
+        return self.publish(msg)
 
     def lights(self, vin, duration: int):
         msg = self.mqtt_request(vin, {"action": "activate", "duration": duration}, "/Lights")
         logger.info(msg)
-        self.publish(msg)
+        return self.publish(msg)
 
     @rate_limit(6, 60 * 20)
     def wakeup(self, vin):
         logger.info("ask wakeup to %s", vin)
         msg = self.mqtt_request(vin, {"action": "state"}, "/VehCharge/state")
         logger.info(msg)
-        self.publish(msg)
-        return True
+        return self.publish(msg)
 
     def lock_door(self, vin, lock: bool):
         if lock:
@@ -267,8 +347,7 @@ class RemoteClient:
 
         msg = self.mqtt_request(vin, {"action": value}, "/Doors")
         logger.info(msg)
-        self.publish(msg)
-        return True
+        return self.publish(msg)
 
     def preconditioning(self, vin, activate: bool):
         if activate:
@@ -281,8 +360,7 @@ class RemoteClient:
             programs = DEFAULT_PRECONDITIONING_PROGRAM
         msg = self.mqtt_request(vin, {"asap": value, "programs": programs}, "/ThermalPrecond")
         logger.info("Preconditioning: %s", msg)
-        self.publish(msg)
-        return True
+        return self.publish(msg)
 
     def load_otp(self, force_new=False):
         otp_session = load_otp()
@@ -293,8 +371,7 @@ class RemoteClient:
         return True
 
     def change_charge_hour(self, vin, hour, miinute):
-        self.veh_charge_request(vin, hour, miinute, DELAYED_CHARGE)
-        return True
+        return self.veh_charge_request(vin, hour, miinute, DELAYED_CHARGE)
 
     def charge_now(self, vin, now):
         if now:
@@ -304,7 +381,7 @@ class RemoteClient:
         hour, minute = self.get_charge_hour(vin)
         res = self.veh_charge_request(vin, hour, minute, charge_type)
         logger.info("charge_now: %s", res)
-        return True
+        return res
 
     def get_charge_hour(self, vin):
         hour_str = self.vehicles_list.get_car_by_vin(vin).status.get_energy('Electric').charging.next_delayed_time

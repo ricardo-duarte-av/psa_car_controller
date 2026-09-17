@@ -3,9 +3,11 @@ from dash import html
 from dash._utils import create_callback_id
 from dash.dependencies import Output, Input
 
+from psa_car_controller.psa.remote_events import CommandResult
 from psa_car_controller.web.app import dash_app
 
 RESPONSE = "-response"
+RESULT_TIMEOUT = 10
 
 
 class Button:
@@ -40,5 +42,14 @@ class Button:
                         html.Div(id=self.get_response_id())])
 
     def call(self, value):  # pylint: disable=unused-argument
-        self._fct(self._element_id)
+        return self.format_response(self._fct(self._element_id))
+
+    @staticmethod
+    def format_response(result):
+        """Show what the car answered instead of just acknowledging the click."""
+        if isinstance(result, CommandResult):
+            result.wait(RESULT_TIMEOUT)
+            return result.message
+        if result is None:
+            return "command not sent, check the logs"
         return " "

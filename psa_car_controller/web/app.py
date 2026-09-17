@@ -91,7 +91,9 @@ def config_flask(title, base_path, debug: bool, host, port, reloader=False,
     importlib.import_module(view)
     if reload_view:
         importlib.reload(view)
-    return {"hostname": host, "port": port, "application": application, "use_reloader": reloader, "use_debugger": debug}
+    # threaded is needed to keep serving requests while /events streams are open
+    return {"hostname": host, "port": port, "application": application, "use_reloader": reloader,
+            "use_debugger": debug, "threaded": True}
 
 
 def run(config):

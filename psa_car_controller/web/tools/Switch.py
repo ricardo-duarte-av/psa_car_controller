@@ -25,5 +25,4 @@ class Switch(Button):
         ), html.Div(id=self.get_response_id())])
 
     def call(self, value):
-        self._fct(self._element_id, value)
-        return " "
+        return self.format_response(self._fct(self._element_id, value))

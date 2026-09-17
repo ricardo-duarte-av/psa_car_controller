@@ -4,6 +4,7 @@ from flask import jsonify, request, Response as FlaskResponse
 from pydantic import BaseModel
 
 from psa_car_controller.common.utils import RateLimitException
+from psa_car_controller.psa.remote_events import CommandResult
 from psa_car_controller.psacc.application.car_controller import PSACarController
 from psa_car_controller.psacc.repository.db import Database
 from psa_car_controller.web.app import app
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 STYLE_CACHE = None
 APP = PSACarController()
+COMMAND_MAX_WAIT = 30
 
 
 def json_response(json: str, status=200):
@@ -29,6 +31,26 @@ def json_response(json: str, status=200):
         status=status,
         mimetype='application/json'
     )
+
+
+def command_response(result: CommandResult):
+    """Answer a remote command.
+
+    The car answers asynchronously on mqtt, so the answer is pending unless the caller asks to
+    wait for it with ?wait=<seconds>. The correlation id can be polled later on /command/<id>.
+    """
+    if result is None:
+        return jsonify({"status": "failed",
+                        "message": "command not sent, check the logs"}), 503
+    wait = request.args.get('wait', None)
+    if wait is not None:
+        try:
+            timeout = min(float(wait), COMMAND_MAX_WAIT)
+        except ValueError:
+            timeout = 0
+        if timeout > 0:
+            result.wait(timeout)
+    return jsonify(result.to_dict())
 
 
 @app.route('/get_vehicles')
@@ -66,27 +88,27 @@ def get_style():
 
 @app.route('/charge_now/<string:vin>/<int:charge>')
 def charge_now(vin, charge):
-    return jsonify(APP.myp.remote_client.charge_now(vin, charge != 0))
+    return command_response(APP.myp.remote_client.charge_now(vin, charge != 0))
 
 
 @app.route('/charge_hour')
 def change_charge_hour():
-    return jsonify(APP.myp.remote_client.change_charge_hour(request.args['vin'],
-                                                            request.args['hour'],
-                                                            request.args['minute']))
+    return command_response(APP.myp.remote_client.change_charge_hour(request.args['vin'],
+                                                                     request.args['hour'],
+                                                                     request.args['minute']))
 
 
 @app.route('/wakeup/<string:vin>')
 def wakeup(vin):
     try:
-        return jsonify(APP.myp.remote_client.wakeup(vin))
+        return command_response(APP.myp.remote_client.wakeup(vin))
     except RateLimitException:
         return jsonify({"error": "Wakeup rate limit exceeded"})
 
 
 @app.route('/preconditioning/<string:vin>/<int:activate>')
 def preconditioning(vin, activate):
-    return jsonify(APP.myp.remote_client.preconditioning(vin, activate))
+    return command_response(APP.myp.remote_client.preconditioning(vin, activate))
 
 
 @app.route('/position/<string:vin>')
@@ -156,7 +178,7 @@ def after_request(response):
 @app.route('/horn/<string:vin>/<int:count>')
 def horn(vin, count):
     try:
-        return jsonify(APP.myp.remote_client.horn(vin, count))
+        return command_response(APP.myp.remote_client.horn(vin, count))
     except RateLimitException:
         return jsonify({"error": "Horn rate limit exceeded"})
 
@@ -164,7 +186,7 @@ def horn(vin, count):
 @app.route('/lights/<string:vin>/<int:duration>')
 def lights(vin, duration):
     try:
-        return jsonify(APP.myp.remote_client.lights(vin, duration))
+        return command_response(APP.myp.remote_client.lights(vin, duration))
     except RateLimitException:
         return jsonify({"error": "Lights rate limit exceeded"})
 
@@ -172,9 +194,33 @@ def lights(vin, duration):
 @app.route('/lock_door/<string:vin>/<int:lock>')
 def lock_door(vin, lock):
     try:
-        return jsonify(APP.myp.remote_client.lock_door(vin, lock))
+        return command_response(APP.myp.remote_client.lock_door(vin, lock))
     except RateLimitException:
         return jsonify({"error": "Locks rate limit exceeded"})
+
+
+@app.route('/command/<string:correlation_id>')
+def get_command_result(correlation_id):
+    result = APP.myp.remote_client.get_command_result(correlation_id)
+    if result is None:
+        return jsonify({"error": "unknown correlation id"}), 404
+    return command_response(result)
+
+
+@app.route('/commands')
+def get_commands():
+    vin = request.args.get('vin', None)
+    return jsonify(APP.myp.remote_client.command_registry.get_all(vin))
+
+
+@app.route('/events')
+def get_events():
+    """Server sent events stream of the mqtt vehicle events and of the command results."""
+    return FlaskResponse(APP.myp.remote_client.event_broker.stream(),
+                         mimetype='text/event-stream',
+                         headers={"Cache-Control": "no-cache",
+                                  "Connection": "keep-alive",
+                                  "X-Accel-Buffering": "no"})
 
 
 @app.route('/settings/<string:section>')
