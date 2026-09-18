@@ -153,15 +153,23 @@ class RemoteClient:
                 "date": data.get("date", None),
                 "battery_level": charging.get("soc_batt", None),
                 "autonomy": charging.get("autonomy_zev", None),
-                "charging": charging.get("remaining_time", 0) != 0 or charging.get("rate", 0) != 0,
+                # only the rate tells a charge apart: remaining_time is published constantly by the
+                # car (observed unchanged for hours while unplugged and discharging), it isn't a
+                # countdown and it doesn't mean a charge is running.
+                "charging": (charging.get("rate", None) or 0) > 0,
                 "charging_rate": charging.get("rate", None),
-                "remaining_time": charging.get("remaining_time", None),
+                # cable_detected has been observed at 1 on a car which wasn't plugged in, so its
+                # meaning isn't confirmed: read it as "the car reports a cable", nothing more. The
+                # api status (plugged) stays the reliable source. Raw values are kept in "raw".
                 "cable_plugged": bool(charging.get("cable_detected", 0)),
                 "preconditioning": bool(precond.get("asap", 0)),
                 "raw": data}
 
     def _fix_not_updated_api(self, charge_info, vin):
-        if charge_info is not None and (charge_info.get('remaining_time', 0) != 0 or charge_info.get('rate', 0) != 0):
+        # A charge is only in progress when the car reports a rate: remaining_time is a constant of
+        # the car, and using it here woke the car up on every event it sent (each wakeup triggering
+        # another event), which kept the car awake and exhausted the remote token rate limit.
+        if charge_info is not None and (charge_info.get('rate', None) or 0) > 0:
             try:
                 car = self.vehicles_list.get_car_by_vin(vin=vin)
                 if car is None:

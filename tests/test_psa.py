@@ -9,7 +9,7 @@ import unittest
 
 from paho.mqtt.client import MQTTMessage
 
-from psa_car_controller.psa.RemoteClient import MQTT_EVENT_TOPIC, MQTT_RESP_TOPIC
+from psa_car_controller.psa.RemoteClient import MQTT_EVENT_TOPIC, MQTT_RESP_TOPIC, RemoteClient
 from psa_car_controller.psa.remote_events import FAILED, PENDING, SUCCESS
 from tests.utils import get_rc
 
@@ -47,7 +47,7 @@ class TestUnit(unittest.TestCase):
         remote_client.vehicles_list.get_car_by_vin = MagicMock(return_value=car)
         remote_client.wakeup = MagicMock()
         # WHEN
-        remote_client._fix_not_updated_api({'remaining_time': 1}, vin)
+        remote_client._fix_not_updated_api({'rate': 1}, vin)
         # THEN
         remote_client.wakeup.assert_called_once_with(vin)
 
@@ -132,6 +132,38 @@ class TestRemoteCommand(unittest.TestCase):
         # THEN it isn't sent a third time
         remote_client.mqtt_client.publish.assert_not_called()
         self.assertEqual(FAILED, result.status)
+
+    @patch("time.sleep", MagicMock())
+    def test_a_car_which_isnt_charging_isnt_woken_up(self):
+        """remaining_time is published constantly by the car, it must not be taken for a charge."""
+        # GIVEN a car which isn't charging
+        remote_client = get_rc()
+        vin = "myvin"
+        car = Car("a", "b", "c")
+        car.status = ApiClient()._ApiClient__deserialize(ELECTRIC_CAR_STATUS, "Status")
+        car.status.get_energy('Electric').charging.status = DISCONNECTED
+        remote_client.vehicles_list.get_car_by_vin = MagicMock(return_value=car)
+        remote_client.wakeup = MagicMock()
+        # WHEN an event reports no rate but a remaining time
+        remote_client._fix_not_updated_api({'remaining_time': 635, 'rate': 0}, vin)
+        # THEN the car is left asleep
+        remote_client.wakeup.assert_not_called()
+
+    def test_vehicle_event_reports_a_charge_only_on_rate(self):
+        # GIVEN a car plugged in, not charging, with a remaining time
+        event = RemoteClient._format_vehicle_event(
+            {"vin": "myvin", "charging_state": {"soc_batt": 53, "rate": 0, "remaining_time": 635,
+                                                "cable_detected": 1, "autonomy_zev": 24}})
+        # THEN it isn't reported as charging
+        self.assertFalse(event["charging"])
+        self.assertEqual(53, event["battery_level"])
+        # AND the unverified raw values stay available
+        self.assertEqual(635, event["raw"]["charging_state"]["remaining_time"])
+        self.assertNotIn("remaining_time", event)
+        # WHEN it charges
+        charging = RemoteClient._format_vehicle_event(
+            {"vin": "myvin", "charging_state": {"soc_batt": 53, "rate": 12, "remaining_time": 635}})
+        self.assertTrue(charging["charging"])
 
     def test_vehicle_event_is_broadcast(self):
         # GIVEN a subscriber to the event stream
