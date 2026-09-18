@@ -107,8 +107,15 @@ These links will work only if PSACC is on your computer, if it isn't please repl
     ```
     event: vehicle
     data: {"type": "vehicle", "date": "2026-09-17T20:54:39+00:00", "data": {"vin": "YOURVIN",
-           "battery_level": 64, "autonomy": 22, "charging": true, "charging_rate": 0, "remaining_time": 635,
+           "battery_level": 64, "autonomy": 22, "charging": false, "charging_rate": 0,
            "cable_plugged": true, "preconditioning": false, "raw": {...}}}
+    ```
+
+    `charging` is true only while the car reports a charging rate. The car also publishes a
+    `remaining_time` and a `cable_detected`, both kept in `raw`: `remaining_time` was seen unchanged
+    for hours on a car which was neither plugged nor charging, and `cable_detected` was seen at 1 on
+    a car which wasn't plugged, so neither can be trusted yet. For the plug and the charge state, the
+    api status (`/get_vehicleinfo/VIN`) stays the reference.
     ```
 
     Example with curl: `curl -N http://localhost:5000/events`
