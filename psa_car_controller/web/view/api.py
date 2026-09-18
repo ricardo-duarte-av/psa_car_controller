@@ -13,8 +13,11 @@ from psa_car_controller.psacc.model.car import Cars
 from psa_car_controller.psacc.repository.trips import Trips
 
 from psa_car_controller.psacc.application.charging import Charging
+from psa_car_controller.psa.push import PushState, build_monitor, webhook_url
 
+import hmac
 import json
+from time import time
 
 from psa_car_controller.web.tools.utils import convert_to_number_if_number_else_return_str
 
@@ -274,6 +277,103 @@ def psa_probe():
                                          trip_id=request.args.get('trip', None)))
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
+
+
+PUSH_STATE = PushState().load()
+# A monitor event triggers a status refresh, but not more often than this: psa can send a burst.
+WEBHOOK_REFRESH_PERIOD = 60
+LAST_WEBHOOK_REFRESH = [0.0]
+
+
+@app.route('/psa/call', methods=['GET', 'POST', 'DELETE'])
+def psa_call():
+    """Call a path of the psa api directly (diagnostic and setup of the monitors).
+
+    GET is read only; POST and DELETE change the psa account, which is what creating a monitor
+    means, so they are only reachable by whoever already reaches this api.
+    """
+    path = request.args.get('path', None)
+    if not path:
+        return jsonify({"error": "path is required"}), 400
+    body = request.get_json(silent=True) if request.method == 'POST' else None
+    try:
+        answer, status = APP.myp.call_api(request.method, path, body,
+                                          accept=request.args.get('accept', "application/hal+json"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(answer), status
+
+
+@app.route('/psa/push')
+def psa_push_state():
+    """What psacc registered on the psa account for push, and the webhook it listens on."""
+    return jsonify(PUSH_STATE.to_dict())
+
+
+@app.route('/psa/push/enable', methods=['GET', 'POST'])
+def psa_push_enable():
+    """Ask psa to post an event to this psacc when the car changes.
+
+    `base_url` is the public url of this psacc (the webhook is /psa/webhook/<token>, which the
+    reverse proxy must let through without authentication: the token in the path is what
+    authenticates psa).
+    """
+    base_url = request.args.get('base_url', None)
+    if not base_url:
+        return jsonify({"error": "base_url is required, e.g. ?base_url=https://psacc.example.com"}), 400
+    vin = request.args.get('vin', None)
+    car = APP.myp.vehicles_list.get_car_by_vin(vin) if vin else next(iter(APP.myp.vehicles_list), None)
+    if car is None:
+        return jsonify({"error": "no vehicle"}), 404
+    token = PUSH_STATE.ensure_token()
+    target = webhook_url(base_url, token)
+    monitor = build_monitor(request.args.get('label', "events"), target)
+    path = f"/user/vehicles/{car.vehicle_id}/callbacks/{request.args['callback']}/monitors" \
+        if request.args.get('callback', None) else f"/user/vehicles/{car.vehicle_id}/monitors"
+    answer, status = APP.myp.call_api('POST', path, monitor)
+    if 200 <= status < 300:
+        PUSH_STATE.target = target
+        monitor_id = answer.get("mid", None) or answer.get("monitorId", None) or str(len(PUSH_STATE.monitors))
+        PUSH_STATE.monitors[str(monitor_id)] = {"vin": car.vin, "path": path, "label": monitor["label"]}
+        PUSH_STATE.save()
+    return jsonify({"sent": {"path": path, "monitor": monitor}, "answer": answer, "status": status}), status
+
+
+@app.route('/psa/push/disable', methods=['GET', 'POST', 'DELETE'])
+def psa_push_disable():
+    """Remove the monitors psacc created, and only those."""
+    removed = {}
+    for monitor_id, monitor in list(PUSH_STATE.monitors.items()):
+        answer, status = APP.myp.call_api('DELETE', monitor["path"] + "/" + monitor_id)
+        removed[monitor_id] = {"status": status, "answer": answer}
+        if 200 <= status < 300 or status == 404:
+            PUSH_STATE.monitors.pop(monitor_id, None)
+    PUSH_STATE.save()
+    return jsonify({"removed": removed, "state": PUSH_STATE.to_dict()})
+
+
+@app.route('/psa/webhook/<string:token>', methods=['POST', 'GET'])
+def psa_webhook(token):
+    """Where psa posts its monitor events.
+
+    Answers 204 to anything authenticated, psa retrying whatever it can't deliver. The event is
+    broadcast on /events so a client sees it immediately, and refreshes the vehicle status, at
+    most once a minute.
+    """
+    if not PUSH_STATE.token or not hmac.compare_digest(token, PUSH_STATE.token):
+        return jsonify({"error": "unknown token"}), 404
+    event = request.get_json(silent=True) or {}
+    logger.info("psa webhook: %s", json.dumps(event)[:1000])
+    APP.myp.remote_client.event_broker.publish("psa_monitor", event)
+    vin = event.get("vin", None) or (event.get("vehicle", None) or {}).get("vin", None)
+    now = time()
+    if vin and now - LAST_WEBHOOK_REFRESH[0] > WEBHOOK_REFRESH_PERIOD:
+        LAST_WEBHOOK_REFRESH[0] = now
+        try:
+            APP.myp.get_vehicle_info(vin)
+        except Exception:  # pylint: disable=broad-except
+            logger.exception("psa_webhook refresh:")
+    return "", 204
 
 
 @app.route('/settings/<string:section>')

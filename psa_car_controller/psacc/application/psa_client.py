@@ -227,6 +227,34 @@ class PSAClient:
             return None
         return (body.get("_embedded", None) or {}).get("trips", [])
 
+    def call_api(self, method, path, body=None, accept=PROBE_DEFAULT_ACCEPT):
+        """Call any path of the psa api, and answer what it answered.
+
+        Monitors and callbacks are created, listed and deleted through paths the generated
+        documentation doesn't describe correctly (a monitor lives under a callback), so the shape
+        of those calls has to be found against the api itself rather than guessed once in code.
+        Restricted to the paths of the psa user api.
+        """
+        self.check_probe_path(path)
+        url = self.api_config.host + path
+        headers = {"x-introspect-realm": self.realm, "Accept": accept}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        try:
+            res = self.manager._bearer_request(  # pylint: disable=protected-access
+                getattr(self.manager._get_session(), method.lower()),  # pylint: disable=protected-access
+                url, params={"client_id": self.client_id}, headers=headers,
+                json=body, timeout=TIMEOUT_IN_S)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.exception("%s %s:", method, path)
+            return {"error": str(e)}, 502
+        try:
+            answer = res.json()
+        except ValueError:
+            answer = {"body": res.text[:2000]}
+        logger.info("%s %s -> %s", method, path, res.status_code)
+        return answer, res.status_code
+
     def get_maintenance(self, vin):
         """Distance and days before the next service."""
         car = self.vehicles_list.get_car_by_vin(vin)

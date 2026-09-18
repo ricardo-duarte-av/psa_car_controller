@@ -163,3 +163,36 @@ Note: `/position/YOURVIN` now asks the dedicated position endpoint of psa first 
 the position of the vehicle status, which can stay frozen for days. The answer says which one it
 used in `source` and when the position was taken in `updated_at`.
 
+24. Let psa push the changes of the car (monitors)
+
+    Psa can watch a data of the car and post an event to a webhook when it changes, which is what
+    the official app subscribes to for its own notifications. This avoids polling.
+
+    Enable it, `base_url` being the public url of this psacc:
+
+    http://localhost:5000/psa/push/enable?base_url=https://psacc.example.com
+
+    It creates a monitor on the psa account, labelled `psacc_...`, watching the charge status, the
+    plug, the doors, whether the car moves and the new trips, and asks psa to post them to
+    `/psa/webhook/<token>`. The token is generated once and kept in `psa_push.json`.
+
+    **The reverse proxy must let `/psa/webhook/` through without authentication**, psa having no
+    way to authenticate: the token in the path is what does it.
+
+    The events are broadcast on `/events` as `psa_monitor`, and a webhook refreshes the vehicle
+    status (at most once a minute).
+
+    See what is registered, and remove what psacc created (never what the official app registered):
+
+    http://localhost:5000/psa/push
+
+    http://localhost:5000/psa/push/disable
+
+25. Call the psa api directly
+
+    http://localhost:5000/psa/call?path=/user/callbacks
+
+    `GET` reads, `POST` (with a json body) and `DELETE` write: this is how the monitors and the
+    callbacks are created and removed, their shape not being described correctly by
+    `docs/api/`. It only accepts paths of the psa api.
+
