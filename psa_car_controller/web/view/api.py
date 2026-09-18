@@ -231,9 +231,11 @@ def psa_probe():
     marked as out of the first release scope, and a car only answers for the services it is
     subscribed to.
     """
-    vin = request.args.get('vin', None)
     try:
-        return jsonify(APP.myp.probe_api(vin))
+        return jsonify(APP.myp.probe_api(request.args.get('vin', None),
+                                         name=request.args.get('endpoint', None),
+                                         preview_len=request.args.get('preview', None),
+                                         accept=request.args.get('accept', None)))
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
 

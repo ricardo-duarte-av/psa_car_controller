@@ -130,3 +130,9 @@ These links will work only if PSACC is on your computer, if it isn't please repl
     only answers for the services it is subscribed to, so this tells which ones are really served
     for your account and your car (maintenance, alerts, last position, trips...).
 
+    One endpoint at a time, with a longer preview (a hal answer starts with a page of `_links`
+    which hides the payload) and another Accept header, some endpoints answering 406 to hal:
+
+    http://localhost:5000/psa/probe?endpoint=trips&preview=20000
+
+    http://localhost:5000/psa/probe?endpoint=lastPosition&accept=application/json
