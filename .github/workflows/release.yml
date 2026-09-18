@@ -84,9 +84,10 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           outputs: type=image,name=${{ env.GHCR_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          # the layers are cached between releases, one cache per platform
-          cache-from: type=gha,scope=${{ env.PLATFORM_SLUG }}
-          cache-to: type=gha,scope=${{ env.PLATFORM_SLUG }},mode=max
+          # the layers are cached between releases, one cache per platform. The cache is in the registry, the
+          # actions cache can't be used: a tag can't read the cache saved by another tag
+          cache-from: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache-${{ env.PLATFORM_SLUG }}
+          cache-to: type=registry,ref=${{ env.GHCR_IMAGE }}:buildcache-${{ env.PLATFORM_SLUG }},mode=max,image-manifest=true,oci-mediatypes=true
       - name: Export digest
         run: |
           mkdir -p ${{ runner.temp }}/digests
