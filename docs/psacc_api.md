@@ -119,3 +119,14 @@ These links will work only if PSACC is on your computer, if it isn't please repl
     ```
 
     Example with curl: `curl -N http://localhost:5000/events`
+
+21. Probe the psa api (diagnostic)
+
+    http://localhost:5000/psa/probe or http://localhost:5000/psa/probe?vin=YOURVIN
+
+    Calls each read only endpoint of the psa api documented in `docs/api/` and answers with the
+    http status, the duration, the keys and a short preview of each one, without changing anything.
+    Most of those endpoints are marked "OUT OF 1ST RELEASE" in psa's own specification and a car
+    only answers for the services it is subscribed to, so this tells which ones are really served
+    for your account and your car (maintenance, alerts, last position, trips...).
+
