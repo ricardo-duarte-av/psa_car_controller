@@ -59,3 +59,29 @@ class TestProbe(unittest.TestCase):
         client = get_client()
         with self.assertRaises(ValueError):
             client.probe_api("notavin")
+
+
+class TestProbeOptions(unittest.TestCase):
+
+    def test_one_endpoint_with_a_longer_preview_and_another_accept(self):
+        # GIVEN an api answering a long body
+        client = get_client()
+        client.manager.get.return_value = response(200, body="x" * 5000)
+        # WHEN a single endpoint is probed with a longer preview and a plain json Accept
+        probe = client.probe_api(name="trips", preview_len=4000, accept="application/json")
+        # THEN only that endpoint is called, and the preview isn't cut at the default length
+        self.assertEqual(1, len(probe["results"]))
+        self.assertEqual("trips", probe["results"][0]["name"])
+        self.assertEqual(4000, len(probe["results"][0]["preview"]))
+        self.assertEqual("application/json", client.manager.get.call_args.kwargs["headers"]["Accept"])
+
+    def test_the_preview_is_capped(self):
+        client = get_client()
+        client.manager.get.return_value = response(200, body="x" * 10)
+        probe = client.probe_api(name="trips", preview_len=10 ** 9)
+        self.assertEqual(10, len(probe["results"][0]["preview"]))
+
+    def test_an_unknown_endpoint_is_rejected(self):
+        client = get_client()
+        with self.assertRaises(ValueError):
+            client.probe_api(name="nope")

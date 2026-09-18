@@ -109,33 +109,43 @@ class PSAClient:
     ]
 
     PROBE_PREVIEW_LEN = 1500
+    PROBE_MAX_PREVIEW_LEN = 200000
+    PROBE_DEFAULT_ACCEPT = "application/hal+json"
 
-    def probe_api(self, vin=None):
-        """Call each read-only psa endpoint and report what it answers.
+    def probe_api(self, vin=None, name=None, preview_len=None, accept=None):
+        """Call the read-only psa endpoints and report what they answer.
 
-        Returns one entry per endpoint with the http status, the time it took and a short preview
-        of the body, so it can be seen which parts of the api are actually served for this account
-        and this car.
+        [name] probes that endpoint alone, [preview_len] asks for a longer preview of the body (a
+        hal answer starts with a page of _links, which hides the payload) and [accept] changes the
+        Accept header, some endpoints refusing hal with a 406.
         """
         car = self.vehicles_list.get_car_by_vin(vin) if vin else next(iter(self.vehicles_list), None)
         if car is None:
             raise ValueError("no vehicle to probe")
+        endpoints = self.PROBE_ENDPOINTS
+        if name is not None:
+            endpoints = [e for e in endpoints if e[0] == name]
+            if not endpoints:
+                raise ValueError("unknown endpoint " + str(name))
+        length = min(int(preview_len or self.PROBE_PREVIEW_LEN), self.PROBE_MAX_PREVIEW_LEN)
         results = []
-        for name, path, extra_params in self.PROBE_ENDPOINTS:
-            results.append(self._probe_endpoint(name, path.format(id=car.vehicle_id), extra_params))
+        for endpoint_name, path, extra_params in endpoints:
+            results.append(self._probe_endpoint(endpoint_name, path.format(id=car.vehicle_id), extra_params,
+                                                length, accept or self.PROBE_DEFAULT_ACCEPT))
         return {"vin": car.vin, "results": results}
 
-    def _probe_endpoint(self, name, path, extra_params):
+    def _probe_endpoint(self, name, path, extra_params, preview_len=PROBE_PREVIEW_LEN,
+                        accept=PROBE_DEFAULT_ACCEPT):
         url = self.api_config.host + path
         params = {"client_id": self.client_id}
         params.update(extra_params)
-        entry = {"name": name, "path": path}
+        entry = {"name": name, "path": path, "accept": accept}
         start = datetime.now()
         try:
             res = self.manager.get(url,
                                    params=params,
                                    headers={"x-introspect-realm": self.realm,
-                                            "Accept": "application/hal+json"},
+                                            "Accept": accept},
                                    timeout=TIMEOUT_IN_S)
         except Exception as e:  # pylint: disable=broad-except
             # A probe never fails the whole request: the error is the result.
@@ -152,7 +162,7 @@ class PSAClient:
             entry["count"] = len(parsed) if isinstance(parsed, list) else None
         except ValueError:
             entry["keys"] = None
-        entry["preview"] = body[:self.PROBE_PREVIEW_LEN]
+        entry["preview"] = body[:preview_len]
         return entry
 
     def set_proxies(self, proxies):
