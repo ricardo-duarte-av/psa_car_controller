@@ -135,4 +135,31 @@ These links will work only if PSACC is on your computer, if it isn't please repl
 
     http://localhost:5000/psa/probe?endpoint=trips&preview=20000
 
-    http://localhost:5000/psa/probe?endpoint=lastPosition&accept=application/json
+    http://localhost:5000/psa/probe?endpoint=lastPosition&accept=*/*
+
+    Any read only path of the psa api, the `_links` of a vehicle advertising more than the
+    documentation of `docs/api/` lists (remotes, callbacks, alarms...). `{id}` is the vehicle and
+    `{tid}` the trip given by `?trip=`:
+
+    http://localhost:5000/psa/probe?path=/user/vehicles/{id}/remotes
+
+    http://localhost:5000/psa/probe?path=/user/vehicles/{id}/trips/{tid}/wayPoints&trip=TRIP_ID
+
+22. Get the trips recorded by psa
+
+    http://localhost:5000/vehicles/YOURVIN/psa_trips
+
+    These are psa's own trips, with the energy levels at both ends, the consumptions and the
+    average speed, and the start and stop positions when the car reports its position. They are
+    not the ones of `/vehicles/trips`, which psacc rebuilds from the positions it polled.
+
+23. Get the next service
+
+    http://localhost:5000/vehicles/YOURVIN/maintenance
+
+    Answers `mileageBeforeMaintenance` and `daysBeforeMaintenance`.
+
+Note: `/position/YOURVIN` now asks the dedicated position endpoint of psa first and falls back to
+the position of the vehicle status, which can stay frozen for days. The answer says which one it
+used in `source` and when the position was taken in `updated_at`.
+

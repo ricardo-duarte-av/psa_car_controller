@@ -85,3 +85,59 @@ class TestProbeOptions(unittest.TestCase):
         client = get_client()
         with self.assertRaises(ValueError):
             client.probe_api(name="nope")
+
+
+class TestProbeAnyPath(unittest.TestCase):
+
+    def test_any_read_only_path_of_the_psa_api(self):
+        # GIVEN a car and an api which answers
+        client = get_client()
+        client.manager.get.return_value = response(200)
+        # WHEN a path its _links advertise, but the docs don't, is probed
+        probe = client.probe_api(path="/user/vehicles/{id}/remotes")
+        # THEN it is called with the vehicle id substituted
+        self.assertEqual("custom", probe["results"][0]["name"])
+        self.assertTrue(client.manager.get.call_args.args[0].endswith("/user/vehicles/myid/remotes"))
+
+    def test_a_trip_id_is_substituted(self):
+        client = get_client()
+        client.manager.get.return_value = response(200)
+        client.probe_api(path="/user/vehicles/{id}/trips/{tid}/wayPoints", trip_id="atrip")
+        self.assertTrue(client.manager.get.call_args.args[0].endswith("/user/vehicles/myid/trips/atrip/wayPoints"))
+
+    def test_the_probe_cannot_be_pointed_at_another_host(self):
+        client = get_client()
+        for path in ("https://example.invalid/steal", "user/vehicles", "/user/../../x"):
+            with self.assertRaises(ValueError):
+                client.probe_api(path=path)
+
+
+class TestApiHelpers(unittest.TestCase):
+
+    def test_last_position_asks_with_a_permissive_accept(self):
+        # GIVEN the dedicated endpoint, which refuses hal
+        client = get_client()
+        client.manager.get.side_effect = lambda url, **kwargs: \
+            response(200) if kwargs["headers"]["Accept"] == "*/*" else response(406, body="nope")
+        # WHEN the position is asked for
+        position = client.get_last_position("myvin")
+        # THEN it answers
+        self.assertEqual({"ok": 1}, position)
+
+    def test_psa_trips_are_unwrapped(self):
+        client = get_client()
+        res = response(200)
+        res.json.return_value = {"total": 2, "_embedded": {"trips": [{"id": "a"}, {"id": "b"}]}}
+        client.manager.get.return_value = res
+        self.assertEqual([{"id": "a"}, {"id": "b"}], client.get_psa_trips("myvin"))
+
+    def test_an_endpoint_which_doesnt_answer_gives_none(self):
+        client = get_client()
+        client.manager.get.return_value = response(404, body="not found")
+        self.assertIsNone(client.get_maintenance("myvin"))
+        client.manager.get.side_effect = OSError("no route")
+        self.assertIsNone(client.get_last_position("myvin"))
+
+    def test_an_unknown_vin_gives_none(self):
+        client = get_client()
+        self.assertIsNone(client.get_psa_trips("notavin"))
