@@ -17,7 +17,7 @@ The image is published to GHCR on every release tag:
 |vX               | last release of this major version           |
 |edge             | build started manually from the Actions tab  |
 
-The image is built for linux/amd64, linux/arm64 and linux/arm/v7. A GHCR package is private until you make it
+The image is only built for linux/amd64. A GHCR package is private until you make it
 public in its package settings, `docker login ghcr.io` is needed while it's private.
 
 ### Installation
