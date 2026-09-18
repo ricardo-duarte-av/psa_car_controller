@@ -49,26 +49,16 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          # each platform builds on its own runner, arm64 natively on an arm runner
+          # each platform builds on its own runner, the arm images aren't built for now.
+          # arm64 builds natively on ubuntu-24.04-arm, arm/v7 needs docker/setup-qemu-action
           - platform: linux/amd64
             runner: ubuntu-latest
-          - platform: linux/arm64
-            runner: ubuntu-24.04-arm
-          # the arm runners can't run 32 bit arm code, arm/v7 is still emulated
-          - platform: linux/arm/v7
-            runner: ubuntu-latest
-            qemu: true
     steps:
       - name: Prepare
         run: |
           echo "GHCR_IMAGE=ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
           PLATFORM=${{ matrix.platform }}
           echo "PLATFORM_SLUG=${PLATFORM//\//-}" >> $GITHUB_ENV
-      - name: Set up QEMU
-        if: matrix.qemu
-        uses: docker/setup-qemu-action@v4
-        with:
-          platforms: ${{ matrix.platform }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Check out the repo
