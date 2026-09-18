@@ -38,8 +38,79 @@ jobs:
        with:
          name: wheel-package
          path: dist/psa_car_controller-0.0.0-py3-none-any.whl
-  push_to_registry:
+  build_image:
     needs: create_release
+    name: Build Docker image (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # each platform builds on its own runner, arm64 natively on an arm runner
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+          # the arm runners can't run 32 bit arm code, arm/v7 is still emulated
+          - platform: linux/arm/v7
+            runner: ubuntu-latest
+            qemu: true
+    steps:
+      - name: Prepare
+        run: |
+          echo "GHCR_IMAGE=ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          PLATFORM=${{ matrix.platform }}
+          echo "PLATFORM_SLUG=${PLATFORM//\//-}" >> $GITHUB_ENV
+      - name: Set up QEMU
+        if: matrix.qemu
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: ${{ matrix.platform }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Check out the repo
+        uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-package
+          path: dist
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # the image is pushed without a tag, the push_to_registry job tags the multi platform image
+      - name: Build and push by digest
+        id: docker_build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          outputs: type=image,name=${{ env.GHCR_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          # the layers are cached between releases, one cache per platform
+          cache-from: type=gha,scope=${{ env.PLATFORM_SLUG }}
+          cache-to: type=gha,scope=${{ env.PLATFORM_SLUG }},mode=max
+      - name: Export digest
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.docker_build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_SLUG }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  push_to_registry:
+    needs: build_image
     name: Push Docker image to GHCR
     runs-on: ubuntu-latest
     permissions:
@@ -56,6 +127,7 @@ jobs:
           DOCKER_HUB_IMAGE: ${{ secrets.DOCKER_USERNAME != '' && 'flobz/psa_car_controller' || '' }}
         run: |
           GHCR_IMAGE=ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          echo "GHCR_IMAGE=${GHCR_IMAGE}" >> $GITHUB_ENV
           IMAGES="${GHCR_IMAGE}"
           if [[ -n "${DOCKER_HUB_IMAGE}" ]]; then
             IMAGES="${IMAGES} ${DOCKER_HUB_IMAGE}"
@@ -69,27 +141,22 @@ jobs:
           else
             VERSION_TAGS="${VERSION}"
           fi
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
           TAGS=""
           for image in ${IMAGES}; do
             for tag in ${VERSION_TAGS}; do
-              TAGS="${TAGS}${TAGS:+,}${image}:${tag}"
+              TAGS="${TAGS} -t ${image}:${tag}"
             done
           done
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "push_to_docker_hub=${DOCKER_HUB_IMAGE:+true}" >> $GITHUB_OUTPUT
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-        with:
-          platforms: all
-      - name: Set up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v4
-      - name: Check out the repo
-        uses: actions/checkout@v6
       - uses: actions/download-artifact@v4
         with:
-          name: wheel-package
-          path: dist
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
       - name: Login to GHCR
         uses: docker/login-action@v4
         with:
@@ -102,21 +169,13 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-      -
-        name: Build and push
-        id: docker_build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.prep.outputs.tags }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
-      -
-        name: Image digest
-        run: echo ${{ steps.docker_build.outputs.digest }}
+      - name: Create and push the multi platform image
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create ${{ steps.prep.outputs.tags }} \
+            $(printf "${GHCR_IMAGE}@sha256:%s " *)
+      - name: Inspect image
+        run: docker buildx imagetools inspect ${GHCR_IMAGE}:${VERSION}
 
   update_ha_config:
     needs: push_to_registry
