@@ -223,6 +223,21 @@ def get_events():
                                   "X-Accel-Buffering": "no"})
 
 
+@app.route('/psa/probe')
+def psa_probe():
+    """Ask the psa api which of its documented endpoints answer for this account and car.
+
+    Diagnostic only, everything it calls is a GET: see docs/api/*.md, where most endpoints are
+    marked as out of the first release scope, and a car only answers for the services it is
+    subscribed to.
+    """
+    vin = request.args.get('vin', None)
+    try:
+        return jsonify(APP.myp.probe_api(vin))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+
+
 @app.route('/settings/<string:section>')
 def settings_section(section: str):
     config_section: BaseModel = getattr(APP.config, section.capitalize())

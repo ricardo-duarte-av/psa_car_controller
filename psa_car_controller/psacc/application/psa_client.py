@@ -17,6 +17,7 @@ from psa_car_controller.psa.RemoteClient import RemoteClient
 from psa_car_controller.psa.RemoteCredentials import RemoteCredentials
 from psa_car_controller.psa.oauth import OpenIdCredentialManager, Oauth2PSACCApiConfig, OauthAPIClient
 from .ecomix import Ecomix
+from psa_car_controller.common.utils import TIMEOUT_IN_S
 from psa_car_controller.psa.constants import realm_info, AUTHORIZE_SERVICE
 
 from .abrp import Abrp
@@ -87,6 +88,72 @@ class PSAClient:
         self.api_config.access_token = self.manager.access_token
         api_instance = VehiclesApi(OauthAPIClient(self.api_config))
         return api_instance
+
+    # Read-only probe of the psa api itself (see docs/api/*.md, generated from psa's spec).
+    # Most of those endpoints are marked "OUT OF 1ST RELEASE (R-LEV 1.1) SCOPE" and a car only
+    # answers for the services its subscription covers, so asking is the only way to know.
+    # Nothing here changes anything: every call is a GET.
+    PROBE_ENDPOINTS = [
+        ("user", "/user", {}),
+        ("vehicles", "/user/vehicles", {}),
+        ("vehicle", "/user/vehicles/{id}", {}),
+        ("status", "/user/vehicles/{id}/status", {"profile": "endUser"}),
+        ("lastPosition", "/user/vehicles/{id}/lastPosition", {}),
+        ("maintenance", "/user/vehicles/{id}/maintenance", {}),
+        ("alerts", "/user/vehicles/{id}/alerts", {}),
+        ("trips", "/user/vehicles/{id}/trips", {}),
+        ("telemetry", "/user/vehicles/{id}/telemetry", {}),
+        ("monitors", "/user/vehicles/{id}/monitors", {}),
+        ("collisions", "/user/vehicles/{id}/collisions", {}),
+        ("user_trips", "/user/trips", {}),
+    ]
+
+    PROBE_PREVIEW_LEN = 1500
+
+    def probe_api(self, vin=None):
+        """Call each read-only psa endpoint and report what it answers.
+
+        Returns one entry per endpoint with the http status, the time it took and a short preview
+        of the body, so it can be seen which parts of the api are actually served for this account
+        and this car.
+        """
+        car = self.vehicles_list.get_car_by_vin(vin) if vin else next(iter(self.vehicles_list), None)
+        if car is None:
+            raise ValueError("no vehicle to probe")
+        results = []
+        for name, path, extra_params in self.PROBE_ENDPOINTS:
+            results.append(self._probe_endpoint(name, path.format(id=car.vehicle_id), extra_params))
+        return {"vin": car.vin, "results": results}
+
+    def _probe_endpoint(self, name, path, extra_params):
+        url = self.api_config.host + path
+        params = {"client_id": self.client_id}
+        params.update(extra_params)
+        entry = {"name": name, "path": path}
+        start = datetime.now()
+        try:
+            res = self.manager.get(url,
+                                   params=params,
+                                   headers={"x-introspect-realm": self.realm,
+                                            "Accept": "application/hal+json"},
+                                   timeout=TIMEOUT_IN_S)
+        except Exception as e:  # pylint: disable=broad-except
+            # A probe never fails the whole request: the error is the result.
+            entry["error"] = str(e)
+            return entry
+        entry["status"] = res.status_code
+        entry["duration_ms"] = int((datetime.now() - start).total_seconds() * 1000)
+        entry["content_type"] = res.headers.get("Content-Type", None)
+        body = res.text or ""
+        entry["size"] = len(body)
+        try:
+            parsed = res.json()
+            entry["keys"] = sorted(parsed.keys()) if isinstance(parsed, dict) else None
+            entry["count"] = len(parsed) if isinstance(parsed, list) else None
+        except ValueError:
+            entry["keys"] = None
+        entry["preview"] = body[:self.PROBE_PREVIEW_LEN]
+        return entry
 
     def set_proxies(self, proxies):
         if proxies is None:
