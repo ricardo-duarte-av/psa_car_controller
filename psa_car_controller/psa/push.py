@@ -47,6 +47,7 @@ MONITOR_GROUPS = [
 # Data attached to each event, so the app doesn't have to ask for the status right after.
 EXTENDED_EVENT_PARAM = ["vehicle.status", "vehicle.position"]
 
+
 class PushState:
     """The webhook token and the monitors psacc created, kept between restarts."""
 
@@ -127,6 +128,7 @@ def build_monitor(label, triggers, locale="en"):
 
 def build_threshold_monitor(label, name, data, op, value, locale="en"):
     """A monitor on a numeric data, which needs a comparison rather than onChange."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments
     return {
         "label": LABEL_PREFIX + label,
         "locale": locale,
