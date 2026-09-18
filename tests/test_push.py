@@ -4,27 +4,57 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock
 
-from psa_car_controller.psa.push import (DEFAULT_TRIGGERS, LABEL_PREFIX, PushState, build_monitor,
-                                         is_ours, webhook_url)
+from psa_car_controller.psa.push import (LABEL_PREFIX, MAX_TRIGGERS, MONITOR_GROUPS, PushState,
+                                         build_callback, build_monitor, build_threshold_monitor,
+                                         is_ours, monitors_path, webhook_url)
 from tests.test_psa_probe import get_client, response
 
 
 class TestMonitorBody(unittest.TestCase):
 
-    def test_a_monitor_watches_the_data_worth_pushing(self):
-        monitor = build_monitor("events", "https://psacc.example.com/psa/webhook/abc")
+    def test_a_monitor_watches_what_psa_accepts(self):
+        label, triggers = MONITOR_GROUPS[0]
+        monitor = build_monitor(label, triggers)
         self.assertTrue(monitor["label"].startswith(LABEL_PREFIX))
         watched = [t["data"]["data"] for t in monitor["triggerParam"]["triggers"]]
         self.assertIn("vehicle.energy.charging.status", watched)
-        self.assertIn("vehicle.trip", watched)
-        self.assertEqual(len(DEFAULT_TRIGGERS), len(watched))
-        # every trigger takes part in the expression, or psa would never fire it
-        for name, _, _ in DEFAULT_TRIGGERS:
+        self.assertIn("vehicle.kinetic.moving", watched)
+        # psa refuses the documented "OnChange" and takes "onChange"
+        self.assertTrue(all(t["data"]["op"] == "onChange" for t in monitor["triggerParam"]["triggers"]))
+        # its expression parser refuses "||"
+        self.assertNotIn("||", monitor["triggerParam"]["boolExp"])
+        for name, _ in triggers:
             self.assertIn(name, monitor["triggerParam"]["boolExp"])
-        self.assertEqual("https://psacc.example.com/psa/webhook/abc",
-                         monitor["subscribeParam"]["callback"]["target"])
         # the status and the position ride with the event, so no call is needed to use it
         self.assertIn("vehicle.status", monitor["extendedEventParam"])
+
+    def test_no_group_exceeds_what_psa_accepts(self):
+        for label, triggers in MONITOR_GROUPS:
+            self.assertTrue(0 < len(triggers) <= MAX_TRIGGERS, label)
+
+    def test_too_many_triggers_is_refused_before_psa_does(self):
+        with self.assertRaises(ValueError):
+            build_monitor("events", [("t%d" % i, "vehicle.kinetic.moving") for i in range(MAX_TRIGGERS + 1)])
+        with self.assertRaises(ValueError):
+            build_monitor("events", [])
+
+    def test_a_numeric_data_is_watched_with_a_comparison(self):
+        monitor = build_threshold_monitor("lowbattery", "level", "vehicle.energy.electric.level",
+                                          "lowerThan", 20)
+        trigger = monitor["triggerParam"]["triggers"][0]
+        self.assertEqual("lowerThan", trigger["data"]["op"])
+        self.assertEqual(["20"], trigger["data"]["value"])
+
+    def test_the_callback_holds_the_webhook(self):
+        callback = build_callback("events", "https://psacc.example.com/psa/webhook/abc")
+        # psa answers "invalid parameter: callback" unless it is at the top level
+        self.assertEqual("https://psacc.example.com/psa/webhook/abc",
+                         callback["callback"]["webhook"]["target"])
+        self.assertTrue(callback["label"].startswith(LABEL_PREFIX))
+
+    def test_a_monitor_lives_under_its_callback(self):
+        # /user/vehicles/<id>/monitors, which the documentation describes, answers 404
+        self.assertEqual("/user/vehicles/v1/callbacks/c1/monitors", monitors_path("v1", "c1"))
 
     def test_ours_are_told_apart_from_the_ones_of_the_official_app(self):
         self.assertTrue(is_ours({"label": LABEL_PREFIX + "events"}))
@@ -59,11 +89,13 @@ class TestPushState(unittest.TestCase):
     def test_monitors_are_remembered(self):
         state = PushState(self.file)
         state.ensure_token()
+        state.callback_id = "cb1"
         state.monitors["mid"] = {"vin": "V", "path": "/p", "label": LABEL_PREFIX + "events"}
         state.save()
         reloaded = PushState(self.file).load()
         self.assertEqual({"mid": {"vin": "V", "path": "/p", "label": LABEL_PREFIX + "events"}},
                          reloaded.monitors)
+        self.assertEqual("cb1", reloaded.callback_id)
         self.assertTrue(reloaded.to_dict()["enabled"])
 
 
