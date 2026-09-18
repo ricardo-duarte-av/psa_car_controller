@@ -13,7 +13,8 @@ from psa_car_controller.psacc.model.car import Cars
 from psa_car_controller.psacc.repository.trips import Trips
 
 from psa_car_controller.psacc.application.charging import Charging
-from psa_car_controller.psa.push import PushState, build_monitor, webhook_url
+from psa_car_controller.psa.push import (MONITOR_GROUPS, PushState, build_callback, build_monitor,
+                                         monitors_path, webhook_url)
 
 import hmac
 import json
@@ -314,9 +315,11 @@ def psa_push_state():
 def psa_push_enable():
     """Ask psa to post an event to this psacc when the car changes.
 
-    `base_url` is the public url of this psacc (the webhook is /psa/webhook/<token>, which the
-    reverse proxy must let through without authentication: the token in the path is what
-    authenticates psa).
+    Creates our own callback, holding the webhook, then a monitor per group of data to watch.
+    `base_url` is the public url of this psacc: the webhook is /psa/webhook/<token>, which the
+    reverse proxy must let through without authentication, the token being what authenticates psa.
+
+    Calling it again reuses the callback and adds only the monitors which are missing.
     """
     base_url = request.args.get('base_url', None)
     if not base_url:
@@ -325,29 +328,54 @@ def psa_push_enable():
     car = APP.myp.vehicles_list.get_car_by_vin(vin) if vin else next(iter(APP.myp.vehicles_list), None)
     if car is None:
         return jsonify({"error": "no vehicle"}), 404
-    token = PUSH_STATE.ensure_token()
-    target = webhook_url(base_url, token)
-    monitor = build_monitor(request.args.get('label', "events"), target)
-    path = f"/user/vehicles/{car.vehicle_id}/callbacks/{request.args['callback']}/monitors" \
-        if request.args.get('callback', None) else f"/user/vehicles/{car.vehicle_id}/monitors"
-    answer, status = APP.myp.call_api('POST', path, monitor)
-    if 200 <= status < 300:
+
+    target = webhook_url(base_url, PUSH_STATE.ensure_token())
+    steps = []
+    if not PUSH_STATE.callback_id:
+        answer, status = APP.myp.call_api('POST', "/user/callbacks", build_callback("events", target))
+        steps.append({"step": "callback", "status": status, "answer": answer})
+        if not 200 <= status < 300:
+            return jsonify({"steps": steps}), status
+        PUSH_STATE.callback_id = answer.get("callbackId", None)
         PUSH_STATE.target = target
-        monitor_id = answer.get("mid", None) or answer.get("monitorId", None) or str(len(PUSH_STATE.monitors))
-        PUSH_STATE.monitors[str(monitor_id)] = {"vin": car.vin, "path": path, "label": monitor["label"]}
         PUSH_STATE.save()
-    return jsonify({"sent": {"path": path, "monitor": monitor}, "answer": answer, "status": status}), status
+
+    existing = {m["label"] for m in PUSH_STATE.monitors.values()}
+    for label, triggers in MONITOR_GROUPS:
+        monitor = build_monitor(label, triggers)
+        if monitor["label"] in existing:
+            continue
+        path = monitors_path(car.vehicle_id, PUSH_STATE.callback_id)
+        answer, status = APP.myp.call_api('POST', path, monitor)
+        steps.append({"step": "monitor", "label": monitor["label"], "status": status, "answer": answer})
+        if 200 <= status < 300:
+            PUSH_STATE.monitors[monitor_id_of(answer)] = {"vin": car.vin, "path": path,
+                                                          "label": monitor["label"]}
+            PUSH_STATE.save()
+    return jsonify({"state": PUSH_STATE.to_dict(), "steps": steps})
+
+
+def monitor_id_of(answer):
+    """The id of a created monitor, psa answering it in the href of its _links."""
+    href = ((answer.get("_links", None) or {}).get("monitor", None) or {}).get("href", "")
+    return href.rstrip("/").rsplit("/", 1)[-1] or str(len(PUSH_STATE.monitors))
 
 
 @app.route('/psa/push/disable', methods=['GET', 'POST', 'DELETE'])
 def psa_push_disable():
-    """Remove the monitors psacc created, and only those."""
+    """Remove the monitors and the callback psacc created, and only those."""
     removed = {}
     for monitor_id, monitor in list(PUSH_STATE.monitors.items()):
         answer, status = APP.myp.call_api('DELETE', monitor["path"] + "/" + monitor_id)
         removed[monitor_id] = {"status": status, "answer": answer}
         if 200 <= status < 300 or status == 404:
             PUSH_STATE.monitors.pop(monitor_id, None)
+    if not PUSH_STATE.monitors and PUSH_STATE.callback_id:
+        answer, status = APP.myp.call_api('DELETE', "/user/callbacks/" + PUSH_STATE.callback_id)
+        removed["callback"] = {"status": status, "answer": answer}
+        if 200 <= status < 300 or status == 404:
+            PUSH_STATE.callback_id = None
+            PUSH_STATE.target = None
     PUSH_STATE.save()
     return jsonify({"removed": removed, "state": PUSH_STATE.to_dict()})
 

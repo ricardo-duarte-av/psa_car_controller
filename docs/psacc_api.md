@@ -172,9 +172,24 @@ used in `source` and when the position was taken in `updated_at`.
 
     http://localhost:5000/psa/push/enable?base_url=https://psacc.example.com
 
-    It creates a monitor on the psa account, labelled `psacc_...`, watching the charge status, the
-    plug, the doors, whether the car moves and the new trips, and asks psa to post them to
-    `/psa/webhook/<token>`. The token is generated once and kept in `psa_push.json`.
+    It creates our own callback, holding the webhook, then the monitors under it, labelled
+    `psacc_...`, and asks psa to post the events to `/psa/webhook/<token>`. The token is generated
+    once and kept in `psa_push.json`, with the callback and the monitors. Calling it again reuses
+    the callback and only adds what is missing.
+
+    Watched: the charge status and the plug, the doors (locked and opening), whether the car moves,
+    whether the engine runs, and the alerts of the car. Each event carries the vehicle status and
+    the last position.
+
+    What psa accepts, found against its api rather than in `docs/api/`:
+
+    - a monitor lives under a callback (`/user/vehicles/{id}/callbacks/{cbid}/monitors`), the
+      documented `/user/vehicles/{id}/monitors` answers 404,
+    - the operator is `onChange`, the documented `OnChange` is refused,
+    - at most 5 triggers per monitor,
+    - `boolExp` refuses `||` and takes ` or `,
+    - `vehicle.trip` and the maintenance counters can't be watched; the numeric data (level,
+      odometer, speed, temperature) need `lowerThan`/`greaterThan` and a value.
 
     **The reverse proxy must let `/psa/webhook/` through without authentication**, psa having no
     way to authenticate: the token in the path is what does it.
