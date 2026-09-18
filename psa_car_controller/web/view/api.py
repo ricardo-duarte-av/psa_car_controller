@@ -113,11 +113,26 @@ def preconditioning(vin, activate):
 
 @app.route('/position/<string:vin>')
 def get_position(vin):
-    res = APP.myp.get_vehicle_info(vin)
-    try:
-        coordinates = res.last_position.geometry.coordinates
-    except AttributeError:
-        return jsonify({'error': 'last_position not available from api'})
+    """The car position, from the dedicated psa endpoint, falling back to the vehicle status.
+
+    The lastPosition of the status can stay frozen for days while the dedicated endpoint keeps
+    answering, so it is asked first; "source" tells which one answered.
+    """
+    coordinates = None
+    source = "lastPosition"
+    updated_at = None
+    position = APP.myp.get_last_position(vin)
+    if position is not None:
+        coordinates = (position.get("geometry", None) or {}).get("coordinates", None)
+        updated_at = (position.get("properties", None) or {}).get("createdAt", None)
+    if not coordinates:
+        source = "status"
+        res = APP.myp.get_vehicle_info(vin)
+        try:
+            coordinates = res.last_position.geometry.coordinates
+            updated_at = str(res.last_position.properties.updated_at)
+        except AttributeError:
+            return jsonify({'error': 'last_position not available from api'})
     longitude, latitude = coordinates[:2]
     if len(coordinates) == 3:  # altitude is not always available
         altitude = coordinates[2]
@@ -125,7 +140,26 @@ def get_position(vin):
         altitude = None
     return jsonify(
         {"longitude": longitude, "latitude": latitude, "altitude": altitude,
+         "updated_at": updated_at, "source": source,
          "url": f"https://maps.google.com/maps?q={latitude},{longitude}"})
+
+
+@app.route('/vehicles/<string:vin>/psa_trips')
+def get_psa_trips(vin):
+    """The trips recorded by psa itself (see /vehicles/trips for the ones psacc rebuilds)."""
+    trips = APP.myp.get_psa_trips(vin)
+    if trips is None:
+        return jsonify({"error": "trips not available from api"}), 404
+    return jsonify(trips)
+
+
+@app.route('/vehicles/<string:vin>/maintenance')
+def get_maintenance(vin):
+    """Distance and days before the next service."""
+    maintenance = APP.myp.get_maintenance(vin)
+    if maintenance is None:
+        return jsonify({"error": "maintenance not available from api"}), 404
+    return jsonify(maintenance)
 
 
 # Set a battery threshold and schedule an hour to stop the charge
@@ -235,7 +269,9 @@ def psa_probe():
         return jsonify(APP.myp.probe_api(request.args.get('vin', None),
                                          name=request.args.get('endpoint', None),
                                          preview_len=request.args.get('preview', None),
-                                         accept=request.args.get('accept', None)))
+                                         accept=request.args.get('accept', None),
+                                         path=request.args.get('path', None),
+                                         trip_id=request.args.get('trip', None)))
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
 

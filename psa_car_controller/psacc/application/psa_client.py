@@ -111,8 +111,10 @@ class PSAClient:
     PROBE_PREVIEW_LEN = 1500
     PROBE_MAX_PREVIEW_LEN = 200000
     PROBE_DEFAULT_ACCEPT = "application/hal+json"
+    # Some endpoints (lastPosition) answer 406 to hal but serve the same body to anything.
+    PROBE_ANY_ACCEPT = "*/*"
 
-    def probe_api(self, vin=None, name=None, preview_len=None, accept=None):
+    def probe_api(self, vin=None, name=None, preview_len=None, accept=None, path=None, trip_id=None):
         """Call the read-only psa endpoints and report what they answer.
 
         [name] probes that endpoint alone, [preview_len] asks for a longer preview of the body (a
@@ -123,16 +125,29 @@ class PSAClient:
         if car is None:
             raise ValueError("no vehicle to probe")
         endpoints = self.PROBE_ENDPOINTS
-        if name is not None:
+        if path is not None:
+            # The documented endpoints are only part of what a car offers: its own _links advertise
+            # more (remotes, callbacks, alarms...), and sub resources need a trip id. Any read only
+            # path of the psa api can be asked for, without a new release for each discovery.
+            endpoints = [("custom", self.check_probe_path(path), {})]
+        elif name is not None:
             endpoints = [e for e in endpoints if e[0] == name]
             if not endpoints:
                 raise ValueError("unknown endpoint " + str(name))
         length = min(int(preview_len or self.PROBE_PREVIEW_LEN), self.PROBE_MAX_PREVIEW_LEN)
         results = []
-        for endpoint_name, path, extra_params in endpoints:
-            results.append(self._probe_endpoint(endpoint_name, path.format(id=car.vehicle_id), extra_params,
+        for endpoint_name, endpoint_path, extra_params in endpoints:
+            formatted = endpoint_path.replace("{id}", car.vehicle_id).replace("{tid}", str(trip_id or ""))
+            results.append(self._probe_endpoint(endpoint_name, formatted, extra_params,
                                                 length, accept or self.PROBE_DEFAULT_ACCEPT))
         return {"vin": car.vin, "results": results}
+
+    @staticmethod
+    def check_probe_path(path):
+        """Only a path of the psa api itself, so the probe can't be pointed at another host."""
+        if not path.startswith("/") or "://" in path or ".." in path:
+            raise ValueError("path must be an absolute path of the psa api, e.g. /user/vehicles/{id}/remotes")
+        return path
 
     def _probe_endpoint(self, name, path, extra_params, preview_len=PROBE_PREVIEW_LEN,
                         accept=PROBE_DEFAULT_ACCEPT):
@@ -164,6 +179,60 @@ class PSAClient:
             entry["keys"] = None
         entry["preview"] = body[:preview_len]
         return entry
+
+    def _get_api(self, path, accept=PROBE_DEFAULT_ACCEPT, params=None):
+        """GET a psa api path and return its parsed body, or None when it doesn't answer."""
+        query = {"client_id": self.client_id}
+        query.update(params or {})
+        try:
+            res = self.manager.get(self.api_config.host + path,
+                                   params=query,
+                                   headers={"x-introspect-realm": self.realm, "Accept": accept},
+                                   timeout=TIMEOUT_IN_S)
+        except Exception:  # pylint: disable=broad-except
+            logger.exception("get %s:", path)
+            return None
+        if res.status_code != 200:
+            logger.warning("get %s answered %s", path, res.status_code)
+            return None
+        try:
+            return res.json()
+        except ValueError:
+            logger.warning("get %s didn't answer json", path)
+            return None
+
+    def get_last_position(self, vin):
+        """The dedicated position endpoint.
+
+        It is served apart from the status, whose lastPosition can stay frozen for days, and it
+        refuses hal with a 406, hence the Accept.
+        """
+        car = self.vehicles_list.get_car_by_vin(vin)
+        if car is None:
+            return None
+        return self._get_api("/user/vehicles/{}/lastPosition".format(car.vehicle_id),
+                             accept=self.PROBE_ANY_ACCEPT)
+
+    def get_psa_trips(self, vin):
+        """The trips psa itself recorded, richer than the ones psacc rebuilds from polled positions.
+
+        They carry the energy levels at both ends, the consumptions, the average speed and, when the
+        car reports its position, the start and stop positions.
+        """
+        car = self.vehicles_list.get_car_by_vin(vin)
+        if car is None:
+            return None
+        body = self._get_api("/user/vehicles/{}/trips".format(car.vehicle_id))
+        if body is None:
+            return None
+        return (body.get("_embedded", None) or {}).get("trips", [])
+
+    def get_maintenance(self, vin):
+        """Distance and days before the next service."""
+        car = self.vehicles_list.get_car_by_vin(vin)
+        if car is None:
+            return None
+        return self._get_api("/user/vehicles/{}/maintenance".format(car.vehicle_id))
 
     def set_proxies(self, proxies):
         if proxies is None:
