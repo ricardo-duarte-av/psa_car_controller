@@ -6,6 +6,7 @@ from hashlib import md5
 from sqlite3.dbapi2 import IntegrityError
 
 from oauth2_client.credentials_manager import ServiceInformation
+import requests
 from urllib3.exceptions import HTTPError
 
 from psa_car_controller.psa.connected_car_api.api.vehicles_api import VehiclesApi
@@ -254,6 +255,64 @@ class PSAClient:
             answer = {"body": res.text[:2000]}
         logger.info("%s %s -> %s", method, path, res.status_code)
         return answer, res.status_code
+
+    # The official app fetches the trips the car logs itself (with their gps track) over bluetooth,
+    # then uploads them to a separate "mym" backend, reachable as contracts/bta. This connectedcar
+    # api carries none of that. The probe checks, read only, whether the credentials psacc already
+    # has are accepted there: if they are, the daemon can serve those trips without the app. If it
+    # answers 401/403 the backend wants its own token, which this does not try to obtain.
+    BTA_HOSTS = ["https://mw-ap-rp.mym.awsmpsa.com", "https://microservices.mym.awsmpsa.com"]
+    BTA_PATHS = ["/api/v1/user/vehicles/{vin}/contracts/bta",
+                 "/api/v1/user/vehicles/{vin}/contracts/bta/trips",
+                 "/api/v1/user/vehicles/{vin}/contracts/bta/lastposition"]
+    BTA_PREVIEW_LEN = 2000
+
+    def probe_bta(self, vin=None):
+        """Ask the mym backend for the bta trips, reusing the token psacc already has.
+
+        Every call is a GET. The token, the client id and a couple of header variants are tried so
+        the answer says whether the existing credentials are enough or whether that backend wants a
+        separate authentication.
+        """
+        car = self.vehicles_list.get_car_by_vin(vin) if vin else next(iter(self.vehicles_list), None)
+        if car is None:
+            raise ValueError("no vehicle to probe")
+        token = self.manager.access_token
+        header_variants = [
+            {"name": "bearer+clientid", "headers": {"x-api-key": self.client_id},
+             "params": {"client_id": self.client_id}},
+            {"name": "bearer+realm", "headers": {"x-introspect-realm": self.realm,
+                                                 "x-api-key": self.client_id},
+             "params": {"client_id": self.client_id}},
+            {"name": "bearer only", "headers": {}, "params": {}},
+        ]
+        results = []
+        for host in self.BTA_HOSTS:
+            for path in self.BTA_PATHS:
+                url = host + path.replace("{vin}", car.vin)
+                for variant in header_variants:
+                    results.append(self._probe_bta_call(url, variant, token))
+                    # once a variant answers something other than a transport error, the others on
+                    # the same url would answer the same auth verdict, so move on
+                    if results[-1].get("status") in (200, 401, 403):
+                        break
+        return {"vin": car.vin, "results": results}
+
+    def _probe_bta_call(self, url, variant, token):
+        entry = {"url": url, "variant": variant["name"]}
+        headers = {"Accept": "application/json", "Authorization": "Bearer " + str(token)}
+        headers.update(variant["headers"])
+        try:
+            res = requests.get(url, params=variant["params"], headers=headers, timeout=TIMEOUT_IN_S)
+        except Exception as e:  # pylint: disable=broad-except
+            entry["error"] = str(e)
+            return entry
+        entry["status"] = res.status_code
+        entry["content_type"] = res.headers.get("Content-Type", None)
+        body = res.text or ""
+        entry["size"] = len(body)
+        entry["preview"] = body[:self.BTA_PREVIEW_LEN]
+        return entry
 
     def get_maintenance(self, vin):
         """Distance and days before the next service."""
