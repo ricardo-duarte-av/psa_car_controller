@@ -286,6 +286,20 @@ WEBHOOK_REFRESH_PERIOD = 60
 LAST_WEBHOOK_REFRESH = [0.0]
 
 
+@app.route('/psa/bta/probe')
+def psa_bta_probe():
+    """Check, read only, whether the bta trips (the ones the car logs and the official app uploads
+    to the mym backend) are reachable with the credentials psacc already has.
+
+    Answers the http status and a short preview per endpoint and header variant. It only reads, and
+    it does not try to obtain a different token: a 401/403 means that backend wants its own auth.
+    """
+    try:
+        return jsonify(APP.myp.probe_bta(request.args.get('vin', None)))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+
+
 @app.route('/psa/call', methods=['GET', 'POST', 'DELETE'])
 def psa_call():
     """Call a path of the psa api directly (diagnostic and setup of the monitors).

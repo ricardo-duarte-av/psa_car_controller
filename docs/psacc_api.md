@@ -211,3 +211,13 @@ used in `source` and when the position was taken in `updated_at`.
     callbacks are created and removed, their shape not being described correctly by
     `docs/api/`. It only accepts paths of the psa api.
 
+26. Probe the bta backend (diagnostic)
+
+    http://localhost:5000/psa/bta/probe
+
+    The trips the car logs itself, with their gps track, are not in the connectedcar api this
+    daemon uses: the official app reads them over bluetooth and uploads them to a separate "mym"
+    backend (`contracts/bta`). This checks, read only, whether the credentials psacc already has
+    are accepted there, answering the http status and a short preview per endpoint. A 401/403 means
+    that backend wants its own authentication, which this does not try to obtain.
+
