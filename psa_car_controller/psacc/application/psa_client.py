@@ -374,6 +374,18 @@ class PSAClient:
         self._pictures_cache[vin] = distinct
         return distinct
 
+    def mym_client(self):
+        """A client for the mym backend, built from this account's brand and country."""
+        from psa_car_controller.psa.mym import MymClient  # pylint: disable=import-outside-toplevel
+        return MymClient(self.brand, self.country_code)
+
+    def account_email(self):
+        """The email of the account, read from the psa user endpoint."""
+        user = self._get_api("/user")
+        if user is None:
+            return None
+        return user.get("email", None)
+
     def get_maintenance(self, vin):
         """Distance and days before the next service."""
         car = self.vehicles_list.get_car_by_vin(vin)
