@@ -323,6 +323,47 @@ class PSAClient:
         entry["preview"] = body[:self.BTA_PREVIEW_LEN]
         return entry
 
+    # Peugeot/Citroen/DS/Opel serve public 3d renders of the exact car (colour, trim, options encoded
+    # in the url) on visuel3d-secure. The vehicle payload lists them; several "views" repeat the same
+    # image, so they are de-duplicated by content once and cached, and the bytes are proxied so a
+    # client only ever talks to this daemon, not to psa.
+    _pictures_cache = {}
+
+    def get_picture_urls(self, vin):
+        car = self.vehicles_list.get_car_by_vin(vin)
+        if car is None:
+            return None
+        body = self._get_api("/user/vehicles/{}".format(car.vehicle_id))
+        if body is None:
+            return None
+        return body.get("pictures", None) or []
+
+    def get_pictures(self, vin):
+        """The distinct pictures of the car, fetched and de-duplicated once, then cached."""
+        if vin in self._pictures_cache:
+            return self._pictures_cache[vin]
+        urls = self.get_picture_urls(vin)
+        if urls is None:
+            return None
+        distinct = []
+        seen = {}
+        for url in urls:
+            try:
+                res = requests.get(url, timeout=TIMEOUT_IN_S)
+            except Exception:  # pylint: disable=broad-except
+                logger.exception("get_pictures: %s", url)
+                continue
+            if res.status_code != 200 or not res.content:
+                continue
+            digest = md5(res.content).hexdigest()
+            if digest in seen:
+                continue
+            seen[digest] = True
+            distinct.append({"content": res.content,
+                             "content_type": res.headers.get("Content-Type", "image/png")})
+        self._pictures_cache[vin] = distinct
+        return distinct
+
     def get_maintenance(self, vin):
         """Distance and days before the next service."""
         car = self.vehicles_list.get_car_by_vin(vin)
