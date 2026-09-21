@@ -221,3 +221,19 @@ used in `source` and when the position was taken in `updated_at`.
     are accepted there, answering the http status and a short preview per endpoint. A 401/403 means
     that backend wants its own authentication, which this does not try to obtain.
 
+27. Get the pictures of the car
+
+    http://localhost:5000/vehicles/YOURVIN/pictures
+
+    Answers the distinct pictures of the car as urls served by this daemon:
+
+    ```json
+    {"vin": "YOURVIN", "count": 8,
+     "pictures": ["vehicles/YOURVIN/picture/0", "vehicles/YOURVIN/picture/1", ...]}
+    ```
+
+    Each `http://localhost:5000/vehicles/YOURVIN/picture/<n>` streams one image. They are the public
+    3d renders of the exact car (colour, trim and options), fetched from psa's render host,
+    de-duplicated (several psa "views" repeat the same image) and cached, and proxied so a client
+    only talks to this daemon.
+

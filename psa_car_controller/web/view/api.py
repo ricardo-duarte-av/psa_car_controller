@@ -157,6 +157,31 @@ def get_psa_trips(vin):
     return jsonify(trips)
 
 
+@app.route('/vehicles/<string:vin>/pictures')
+def get_pictures(vin):
+    """The distinct pictures of the car as urls served by this daemon, not by psa."""
+    pictures = APP.myp.get_pictures(vin)
+    if pictures is None:
+        return jsonify({"error": "pictures not available from api"}), 404
+    return jsonify({"vin": vin, "count": len(pictures),
+                    "pictures": ["vehicles/{}/picture/{}".format(vin, i) for i in range(len(pictures))]})
+
+
+@app.route('/vehicles/<string:vin>/picture/<int:index>')
+def get_picture(vin, index):
+    """One car picture, proxied from psa's public render host and cached."""
+    pictures = APP.myp.get_pictures(vin)
+    if pictures is None or not 0 <= index < len(pictures):
+        return jsonify({"error": "no such picture"}), 404
+    picture = pictures[index]
+    return app.response_class(
+        response=picture["content"],
+        status=200,
+        mimetype=picture["content_type"],
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @app.route('/vehicles/<string:vin>/maintenance')
 def get_maintenance(vin):
     """Distance and days before the next service."""
