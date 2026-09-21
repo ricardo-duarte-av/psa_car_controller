@@ -46,11 +46,15 @@ class TestMymClient(unittest.TestCase):
         post.return_value = response(body={"lastPosition": {"lat": 1}})
         client = MymClient("AP", "FR")
         client.token = "TICKET"
-        answer, status = client.post_bta("myvin", "lastposition")
+        answer, status = client.post_bta("myvin", "lastposition", extra={"culture": "pt_PT"})
         self.assertEqual(200, status)
         self.assertEqual({"lastPosition": {"lat": 1}}, answer)
         self.assertEqual(("certs/public.pem", "certs/private.pem"), post.call_args.kwargs["cert"])
         self.assertEqual("TICKET", post.call_args.kwargs["headers"]["Token"])
+        import json as _json
+        sent = _json.loads(post.call_args.kwargs["data"])
+        self.assertEqual("TICKET", sent["ticket"])
+        self.assertEqual("pt_PT", sent["culture"])
         self.assertIn("mw-ap-rp.mym.awsmpsa.com", post.call_args.args[0])
         self.assertIn("/contracts/bta/lastposition", post.call_args.args[0])
 
