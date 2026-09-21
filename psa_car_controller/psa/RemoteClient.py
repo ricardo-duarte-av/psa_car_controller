@@ -26,6 +26,10 @@ MQTT_SERVER = "mwa.mpsa.com"
 MQTT_RESP_TOPIC = "psa/RemoteServices/to/cid/"
 MQTT_EVENT_TOPIC = "psa/RemoteServices/events/MPHRTServices/"
 MQTT_TOKEN_TTL = 890
+# The battery soc can't physically move faster than this. The car replays its asleep events in
+# bursts with stray soc values (a lone 66 among a run of 0s was observed), so a jump too large for
+# the elapsed time between two events is a glitch and the last accepted value is kept instead.
+MAX_SOC_PERCENT_PER_MIN = 5
 
 
 class RemoteException(Exception):
@@ -53,6 +57,7 @@ class RemoteClient:
         self.otp = None
         self._lock = threading.Lock()
         self.update_thread: threading.Timer = None
+        self._last_battery = {}  # vin -> (level, event date), the last soc accepted from an event
 
     def __on_mqtt_connect(self, client, userdata, result_code, _):  # pylint: disable=unused-argument
         logger.info("Connected with result code %s", result_code)
@@ -82,7 +87,10 @@ class RemoteClient:
                 programs = data["precond_state"].get("programs", None)
                 if programs:
                     self.precond_programs[data["vin"]] = data["precond_state"]["programs"]
-                self.event_broker.publish("vehicle", self._format_vehicle_event(data))
+                event = self._format_vehicle_event(data)
+                event["battery_level"] = self._plausible_battery_level(data["vin"], event["battery_level"],
+                                                                       event["date"])
+                self.event_broker.publish("vehicle", event)
             self._fix_not_updated_api(charge_info, data["vin"])
         except KeyError:
             logger.exception("on_mqtt_message:")
@@ -144,6 +152,39 @@ class RemoteClient:
             if result is not None:
                 logger.debug("answer without known correlation id, attached to %s", result.action)
         return result
+
+    @staticmethod
+    def _parse_event_date(date):
+        if not date:
+            return None
+        try:
+            return datetime.fromisoformat(date.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            return None
+
+    def _plausible_battery_level(self, vin, level, date):
+        """Reject a soc that jumped faster than physically possible, keeping the last accepted value.
+
+        The car replays its asleep events out of order and with stray soc values, so a lone wrong
+        reading (e.g. a single 66 between two 0s) would otherwise flash on the live view. The soc is
+        rate bounded, so a change too large for the elapsed time between the two events is discarded.
+        The first reading of a vin is accepted, later ones are compared to it. Only the live event is
+        filtered, the recorded history and charge control read the api level, not this.
+        """
+        if level is None:
+            return None
+        event_date = self._parse_event_date(date)
+        prev = self._last_battery.get(vin)
+        if prev is not None:
+            prev_level, prev_date = prev
+            if event_date is not None and prev_date is not None:
+                dt_min = abs((event_date - prev_date).total_seconds()) / 60  # events can arrive out of order
+                max_delta = MAX_SOC_PERCENT_PER_MIN * dt_min + 1  # +1 so a rounded jump on a short gap passes
+                if abs(level - prev_level) > max_delta:
+                    logger.info("discard implausible battery level %s%% for %s (kept %s%%)", level, vin, prev_level)
+                    return prev_level
+        self._last_battery[vin] = (level, event_date)
+        return level
 
     @staticmethod
     def _format_vehicle_event(data):

@@ -179,3 +179,26 @@ class TestRemoteCommand(unittest.TestCase):
         self.assertEqual(76, event["data"]["battery_level"])
         self.assertTrue(event["data"]["cable_plugged"])
         self.assertFalse(event["data"]["charging"])
+
+    def test_implausible_battery_level_is_discarded(self):
+        # GIVEN a remote client that accepted a first soc
+        remote_client = get_rc()
+        vin = "myvin"
+        base = '{{"date":"{}","precond_state":{{}},"charging_state":{{"soc_batt":{},"rate":0}},"vin":"myvin"}}'
+
+        def battery_after(date, soc):
+            msg = MQTTMessage(topic=MQTT_EVENT_TOPIC.encode("utf-8"))
+            msg.payload = base.format(date, soc).encode("utf-8")
+            queue = remote_client.event_broker.subscribe()
+            remote_client._on_mqtt_message(None, None, msg)
+            level = queue.get_nowait()["data"]["battery_level"]
+            remote_client.event_broker.unsubscribe(queue)
+            return level
+
+        self.assertEqual(0, battery_after("2026-09-21T14:26:54Z", 0))
+        # WHEN a lone soc jumps too far for the elapsed time THEN it's discarded, the last one kept
+        self.assertEqual(0, battery_after("2026-09-21T14:27:10Z", 66))
+        # AND a plausible change is accepted
+        self.assertEqual(1, battery_after("2026-09-21T14:37:10Z", 1))
+        # AND a big change over a long gap (asleep then charged) is accepted
+        self.assertEqual(95, battery_after("2026-09-21T20:37:10Z", 95))
