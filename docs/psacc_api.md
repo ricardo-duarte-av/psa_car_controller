@@ -237,3 +237,16 @@ used in `source` and when the position was taken in `updated_at`.
     de-duplicated (several psa "views" repeat the same image) and cached, and proxied so a client
     only talks to this daemon.
 
+28. Read the bta data (the trips the car logs itself)
+
+    http://localhost:5000/psa/bta/fetch?password=YOURPASSWORD (POST or GET)
+
+    The trips the car records with their gps track live on a separate "mym" backend that needs the
+    client certificate the setup extracts (certs/*.pem) and its own token. The token is obtained
+    once from the psa account password (the same GetAccessToken flow as the setup) and kept in
+    memory; the password itself is not stored. Afterwards no password is needed until restart.
+
+    Defaults to the (safe) last position. `?path=trips` and an optional json `body` allow reading
+    the other bta resources. Those endpoints answer only to POST (Allow: POST), so this posts with
+    the cert and the token.
+

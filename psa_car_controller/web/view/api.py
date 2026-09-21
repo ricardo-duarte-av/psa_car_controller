@@ -311,6 +311,47 @@ WEBHOOK_REFRESH_PERIOD = 60
 LAST_WEBHOOK_REFRESH = [0.0]
 
 
+# The bta backend needs a token from the account password (obtained once, then kept in memory);
+# the password itself is never stored.
+_MYM = {"client": None}
+
+
+@app.route('/psa/bta/fetch', methods=['POST', 'GET'])
+def psa_bta_fetch():
+    """Read a bta resource from the mym backend.
+
+    Needs the psa account password once (?password= or a json body {"password": ...}) to obtain the
+    mym token, which is kept in memory and reused; the password isn't stored. Defaults to the safe
+    lastposition; ?path= and an optional json "body" allow finding the exact read shape of the trips
+    without another build. Everything it POSTs carries the client cert and the token.
+    """
+    payload = request.get_json(silent=True) or {}
+    password = request.args.get('password', None) or payload.get('password', None)
+    email = request.args.get('email', None) or payload.get('email', None)
+    vin = request.args.get('vin', None) or payload.get('vin', None)
+    path = request.args.get('path', None) or payload.get('path', None) or "lastposition"
+    body = payload.get('body', None)
+
+    car = APP.myp.vehicles_list.get_car_by_vin(vin) if vin else next(iter(APP.myp.vehicles_list), None)
+    if car is None:
+        return jsonify({"error": "no vehicle"}), 404
+
+    client = _MYM["client"]
+    if client is None or client.token is None:
+        if not password:
+            return jsonify({"error": "password is required once to obtain the mym token "
+                            "(?password=, and ?email= if it differs from the account)"}), 400
+        client = APP.myp.mym_client()
+        try:
+            client.get_token(email or APP.myp.account_email(), password)
+        except Exception as e:  # pylint: disable=broad-except
+            return jsonify({"error": "couldn't obtain the mym token: " + str(e)}), 502
+        _MYM["client"] = client
+
+    answer, status = client.post_bta(car.vin, path, body)
+    return jsonify({"path": path, "answer": answer, "status": status}), 200
+
+
 @app.route('/psa/bta/probe')
 def psa_bta_probe():
     """Check, read only, whether the bta trips (the ones the car logs and the official app uploads
