@@ -341,7 +341,9 @@ def psa_bta_fetch():
         if not password:
             return jsonify({"error": "password is required once to obtain the mym token "
                             "(?password=, and ?email= if it differs from the account)"}), 400
-        client = APP.myp.mym_client()
+        brand_code = request.args.get('brand', None) or payload.get('brand', None)
+        country = request.args.get('country', None) or payload.get('country', None)
+        client = APP.myp.mym_client(brand_code, country)
         try:
             client.get_token(email or APP.myp.account_email(), password)
         except Exception as e:  # pylint: disable=broad-except
