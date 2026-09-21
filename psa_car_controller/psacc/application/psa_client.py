@@ -267,7 +267,15 @@ class PSAClient:
     # it is the same cert app_decoder presents to mw-<brand>-m2c for /api/v1/user. Without it the
     # backend answers "496 Client certificate is required".
     BTA_CERT = ("certs/public.pem", "certs/private.pem")
-    BTA_HOSTS = ["https://mw-ap-rp.mym.awsmpsa.com", "https://microservices.mym.awsmpsa.com"]
+    # mw-<brand>-m2c is the host app_decoder posts /api/v1/user to; mw-ap-rp answered 405 to GET
+    # (endpoint present, wrong method), so the method and the right host still have to be found.
+    BTA_HOSTS = ["https://mw-ap-rp.mym.awsmpsa.com",
+                 "https://mw-{brand}-m2c.mym.awsmpsa.com",
+                 "https://microservices.mym.awsmpsa.com"]
+    # GET and OPTIONS only: both are safe, and a 405 or the OPTIONS answer names the real method in
+    # its Allow header, so nothing is POSTed (which on these paths could create data).
+    BTA_METHODS = ["GET", "OPTIONS"]
+    BTA_REPORT_HEADERS = ["Allow", "WWW-Authenticate", "Content-Type", "Access-Control-Allow-Methods"]
     BTA_PATHS = ["/api/v1/user/vehicles/{vin}/contracts/bta",
                  "/api/v1/user/vehicles/{vin}/contracts/bta/trips",
                  "/api/v1/user/vehicles/{vin}/contracts/bta/lastposition"]
@@ -292,32 +300,34 @@ class PSAClient:
              "params": {"client_id": self.client_id}},
             {"name": "bearer only", "headers": {}, "params": {}},
         ]
+        brand = (self.brand or "ap").lower()
+        # the simplest header variant is enough to read the method/auth verdict; the earlier probe
+        # already showed the variants don't change it
+        variant = header_variants[0]
         results = []
-        for host in self.BTA_HOSTS:
+        for host_tpl in self.BTA_HOSTS:
+            host = host_tpl.replace("{brand}", brand)
             for path in self.BTA_PATHS:
                 url = host + path.replace("{vin}", car.vin)
-                for variant in header_variants:
-                    results.append(self._probe_bta_call(url, variant, token))
-                    # once a variant answers something other than a transport error, the others on
-                    # the same url would answer the same auth verdict, so move on
-                    if results[-1].get("status") in (200, 401, 403):
-                        break
+                for method in self.BTA_METHODS:
+                    results.append(self._probe_bta_call(method, url, variant, token))
         return {"vin": car.vin, "results": results}
 
-    def _probe_bta_call(self, url, variant, token):
-        entry = {"url": url, "variant": variant["name"]}
+    def _probe_bta_call(self, method, url, variant, token):
+        entry = {"method": method, "url": url, "variant": variant["name"]}
         cert = self.BTA_CERT if all(os.path.isfile(f) for f in self.BTA_CERT) else None
         entry["client_cert"] = cert is not None
         headers = {"Accept": "application/json", "Authorization": "Bearer " + str(token)}
         headers.update(variant["headers"])
         try:
-            res = requests.get(url, params=variant["params"], headers=headers,
-                               cert=cert, timeout=TIMEOUT_IN_S)
+            res = requests.request(method, url, params=variant["params"], headers=headers,
+                                   cert=cert, timeout=TIMEOUT_IN_S)
         except Exception as e:  # pylint: disable=broad-except
             entry["error"] = str(e)
             return entry
         entry["status"] = res.status_code
-        entry["content_type"] = res.headers.get("Content-Type", None)
+        # the interesting part of a 405/401 is which methods and which auth the backend names
+        entry["headers"] = {h: res.headers.get(h) for h in self.BTA_REPORT_HEADERS if res.headers.get(h)}
         body = res.text or ""
         entry["size"] = len(body)
         entry["preview"] = body[:self.BTA_PREVIEW_LEN]
