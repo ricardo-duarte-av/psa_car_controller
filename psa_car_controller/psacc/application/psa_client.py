@@ -6,6 +6,7 @@ from hashlib import md5
 from sqlite3.dbapi2 import IntegrityError
 
 from oauth2_client.credentials_manager import ServiceInformation
+import os
 import requests
 from urllib3.exceptions import HTTPError
 
@@ -261,6 +262,11 @@ class PSAClient:
     # api carries none of that. The probe checks, read only, whether the credentials psacc already
     # has are accepted there: if they are, the daemon can serve those trips without the app. If it
     # answers 401/403 the backend wants its own token, which this does not try to obtain.
+    # The mym backend requires the client certificate the setup already extracts from the app
+    # (assets/MWPMYMA1.pfx -> certs/public.pem + certs/private.pem, see psa/setup/apk_parser.py);
+    # it is the same cert app_decoder presents to mw-<brand>-m2c for /api/v1/user. Without it the
+    # backend answers "496 Client certificate is required".
+    BTA_CERT = ("certs/public.pem", "certs/private.pem")
     BTA_HOSTS = ["https://mw-ap-rp.mym.awsmpsa.com", "https://microservices.mym.awsmpsa.com"]
     BTA_PATHS = ["/api/v1/user/vehicles/{vin}/contracts/bta",
                  "/api/v1/user/vehicles/{vin}/contracts/bta/trips",
@@ -300,10 +306,13 @@ class PSAClient:
 
     def _probe_bta_call(self, url, variant, token):
         entry = {"url": url, "variant": variant["name"]}
+        cert = self.BTA_CERT if all(os.path.isfile(f) for f in self.BTA_CERT) else None
+        entry["client_cert"] = cert is not None
         headers = {"Accept": "application/json", "Authorization": "Bearer " + str(token)}
         headers.update(variant["headers"])
         try:
-            res = requests.get(url, params=variant["params"], headers=headers, timeout=TIMEOUT_IN_S)
+            res = requests.get(url, params=variant["params"], headers=headers,
+                               cert=cert, timeout=TIMEOUT_IN_S)
         except Exception as e:  # pylint: disable=broad-except
             entry["error"] = str(e)
             return entry
