@@ -20,7 +20,7 @@ from psa_car_controller.psa.RemoteCredentials import RemoteCredentials
 from psa_car_controller.psa.oauth import OpenIdCredentialManager, Oauth2PSACCApiConfig, OauthAPIClient
 from .ecomix import Ecomix
 from psa_car_controller.common.utils import TIMEOUT_IN_S
-from psa_car_controller.psa.constants import realm_info, AUTHORIZE_SERVICE
+from psa_car_controller.psa.constants import realm_info, AUTHORIZE_SERVICE, BRAND
 
 from .abrp import Abrp
 from psa_car_controller.psacc.repository.db import Database
@@ -374,10 +374,19 @@ class PSAClient:
         self._pictures_cache[vin] = distinct
         return distinct
 
-    def mym_client(self):
-        """A client for the mym backend, built from this account's brand and country."""
+    def brand_code(self):
+        """The brand code (AP, AC, ...). self.brand may be unset at runtime, so fall back to the realm."""
+        if self.brand:
+            return self.brand
+        for info in BRAND.values():
+            if info["realm"] == self.realm:
+                return info["brand_code"]
+        return None
+
+    def mym_client(self, brand_code=None, country_code=None):
+        """A client for the mym backend, built from this account's brand and country (overridable)."""
         from psa_car_controller.psa.mym import MymClient  # pylint: disable=import-outside-toplevel
-        return MymClient(self.brand, self.country_code)
+        return MymClient(brand_code or self.brand_code(), country_code or self.country_code)
 
     def account_email(self):
         """The email of the account, read from the psa user endpoint."""

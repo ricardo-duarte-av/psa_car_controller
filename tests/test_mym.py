@@ -65,3 +65,28 @@ class TestMymClient(unittest.TestCase):
         answer, status = client.post_bta("vin", "lastposition")
         self.assertEqual(502, status)
         self.assertIn("error", answer)
+
+
+class TestBrandDerivation(unittest.TestCase):
+
+    def _client(self, brand, realm):
+        from psa_car_controller.psacc.application.psa_client import PSAClient
+        c = PSAClient.__new__(PSAClient)
+        c.brand = brand
+        c.realm = realm
+        c.country_code = "PT"
+        return c
+
+    def test_brand_code_falls_back_to_the_realm(self):
+        self.assertEqual("AP", self._client(None, "clientsB2CPeugeot").brand_code())
+        self.assertEqual("AC", self._client(None, "clientsB2CCitroen").brand_code())
+        # an explicit brand wins
+        self.assertEqual("OP", self._client("OP", "clientsB2CPeugeot").brand_code())
+
+    def test_mym_client_uses_the_derived_brand_and_country(self):
+        client = self._client(None, "clientsB2CPeugeot").mym_client()
+        self.assertEqual("AP_PT_ESP", client.site_code)
+
+    def test_overrides_win(self):
+        client = self._client(None, "clientsB2CPeugeot").mym_client("AC", "FR")
+        self.assertEqual("AC_FR_ESP", client.site_code)
