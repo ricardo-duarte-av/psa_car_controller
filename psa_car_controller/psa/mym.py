@@ -43,6 +43,9 @@ class MymClient:
         self.country_code = country_code
         self.version = version
         self.site_code = "{}_{}_ESP".format(brand_code, country_code)
+        # the backend wants a culture on the bta body; language usually matches the country for
+        # these accounts (pt_PT, fr_FR), overridable from the request when it doesn't.
+        self.culture = "{}_{}".format((country_code or "").lower(), country_code)
         self.token = None
 
     def get_token(self, email, password):
@@ -68,12 +71,19 @@ class MymClient:
     def _host(self):
         return BTA_HOST.replace("{brand}", self.brand_code.lower())
 
-    def post_bta(self, vin, path, body=None):
-        """POST a bta path, with the cert and the token. Returns (parsed_or_text, status)."""
+    def post_bta(self, vin, path, extra=None):
+        """POST a bta path with the cert and the token.
+
+        The body carries the site code, the ticket and the culture the backend requires; [extra]
+        merges in any other field (and can override these), so the exact read shape can be found
+        without changing this code.
+        """
         if self.token is None:
             raise MymError("no token, call get_token first")
         url = "{}/api/v1/user/vehicles/{}/contracts/bta/{}".format(self._host(), vin, path.strip("/"))
-        payload = body if body is not None else {"siteCode": self.site_code, "ticket": self.token}
+        payload = {"siteCode": self.site_code, "ticket": self.token, "culture": self.culture}
+        if extra:
+            payload.update(extra)
         try:
             res = requests.post(
                 url,

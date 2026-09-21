@@ -350,8 +350,16 @@ def psa_bta_fetch():
             return jsonify({"error": "couldn't obtain the mym token: " + str(e)}), 502
         _MYM["client"] = client
 
-    answer, status = client.post_bta(car.vin, path, body)
-    return jsonify({"path": path, "answer": answer, "status": status}), 200
+    extra = {}
+    if isinstance(body, dict):
+        extra.update(body)
+    culture = request.args.get('culture', None) or payload.get('culture', None)
+    if culture:
+        extra["culture"] = culture
+    if culture:
+        client.culture = culture
+    answer, status = client.post_bta(car.vin, path, extra=extra or None)
+    return jsonify({"path": path, "culture": client.culture, "answer": answer, "status": status}), 200
 
 
 @app.route('/psa/bta/probe')
