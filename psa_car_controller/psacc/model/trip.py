@@ -37,6 +37,8 @@ class Trip:
         self.id = None
 
     def add_points(self, latitude, longitude):
+        if latitude is None or longitude is None:  # recorded while the car's gps wasn't updated
+            return
         self.positions.append(Points(latitude, longitude))
 
     def add_temperature(self, temp):

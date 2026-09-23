@@ -185,8 +185,9 @@ class TestUnit(unittest.TestCase):
 
     @patch("psa_car_controller.psacc.repository.db.Database.record_position")
     def test_record_info_skip_not_updated_position(self, mock_db):
-        """A position the api didn't update must not be recorded again under a fresh date,
-        it would build a trip with a route the car never drove."""
+        """A position the api didn't update must not be recorded again under a fresh date, it would
+        build a trip with a route the car never drove. The mileage and levels still are, without
+        coordinates, or a car whose gps stopped reporting would get no trips."""
         api = ApiClient()
         status: psa.connected_car_api.models.status.Status = api._ApiClient__deserialize(ELECTRIC_CAR_STATUS, "Status")
         get_new_test_db()
@@ -196,11 +197,16 @@ class TestUnit(unittest.TestCase):
         myp = PSAClient.load_config(DATA_DIR + "config.json")
         myp.record_info(car)
         myp.record_info(car)
-        self.assertEqual(1, mock_db.call_count)
-        # an updated position is recorded again
+        self.assertEqual(2, mock_db.call_count)
+        _, vin, mileage, latitude, longitude, altitude, date, level, *_ = mock_db.call_args.args
+        self.assertEqual((None, None, None), (latitude, longitude, altitude))
+        self.assertEqual(car.status.get_energy('Electric').updated_at, date)
+        self.assertEqual(car.status.timed_odometer.mileage, mileage)
+        # an updated position is recorded with its coordinates again
         status.last_position.properties.updated_at = datetime(2022, 3, 26, 12, 2, 54, tzinfo=tzutc())
         myp.record_info(car)
-        self.assertEqual(2, mock_db.call_count)
+        self.assertEqual(3, mock_db.call_count)
+        self.assertIsNotNone(mock_db.call_args.args[3])
 
     @patch("psa_car_controller.psacc.repository.db.Database.record_position")
     def test_record_info_without_position_date(self, mock_db):
@@ -339,6 +345,19 @@ class TestUnit(unittest.TestCase):
                                    'id': 1,
                                    'consumption': 1.32,
                                    'consumption_fuel_km': 4.53}])
+
+    def test_trip_without_coordinates(self):
+        """Rows recorded while the car's gps wasn't updated still build a trip, with no route."""
+        get_new_test_db()
+        config_repository.CONFIG_FILENAME = DATA_DIR + "config.ini"
+        car = self.vehicule_list[1]
+        Database.record_position(None, car.vin, 11, None, None, None, date0, 40, 30, False, None)
+        Database.record_position(None, car.vin, 20, None, None, None, date1, 35, 29, False, None)
+        Database.record_position(None, car.vin, 30, None, None, None, date2, 30, 28, False, None)
+        res = Trips.get_trips(self.vehicule_list)[car.vin].get_trips_as_dict()
+        self.assertEqual(1, len(res))
+        self.assertEqual(19.0, res[0]["distance"])
+        self.assertEqual({'lat': [], 'long': []}, res[0]["positions"])
 
     def test_none_mileage(self):
         get_new_test_db()
