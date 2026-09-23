@@ -89,6 +89,17 @@ class TestMergedTrips(unittest.TestCase):
         self.assertAlmostEqual(10 * self.car.battery_power / 100, trip.consumption)
         self.assertAlmostEqual(10 * self.car.battery_power / 10, trip.consumption_km)
 
+    def test_a_status_reading_is_not_trusted_when_psa_made_its_level_up(self):
+        # 23/09/2026: a status row of 21/09 (recorded before such levels were filtered) said 100%,
+        # like psa's trip, on a battery that was at 5% half an hour later
+        Database.record_position(None, self.car.vin, 1000, None, None, None, at(-2 * 24 * 60), 100, 38, False, None)
+        trip = MergedTrips.get(self.car, [], [psa_trip(at(0), 10, 1.7, electric=100.0, electric_autonomy=0)])[0]
+        self.assertIsNone(trip.start_level)
+        # the car's own reading still is
+        Database.record_battery_reading(self.car.vin, at(-60), 6, 0)
+        trip = MergedTrips.get(self.car, [], [psa_trip(at(0), 10, 1.7, electric=100.0, electric_autonomy=0)])[0]
+        self.assertEqual((6, "car"), (trip.start_level, trip.start_level_source))
+
     def test_the_status_readings_are_used_without_the_cars(self):
         Database.record_position(None, self.car.vin, 1000, None, None, None, at(-5), 60, 38, False, None)
         Database.record_position(None, self.car.vin, 1010, None, None, None, at(12), 55, 37, False, None)
