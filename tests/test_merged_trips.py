@@ -181,7 +181,8 @@ class TestMergedTrips(unittest.TestCase):
         self.assertEqual([1, 2], [t.id for t in trips])
 
     def test_trips_apart_or_not_following_on_are_not_joined(self):
-        long_stop = [psa_trip(at(0), 8, 1.7, mileage=1000.0), psa_trip(at(14), 12, 3.7, mileage=1001.7)]
+        # 23/09/2026: 18.7 km, then 1.7 km 4m52s later, were two trips
+        long_stop = [psa_trip(at(0), 8, 1.7, mileage=1000.0), psa_trip(at(12 + 52 / 60), 12, 3.7, mileage=1001.7)]
         odometer_jump = [psa_trip(at(0), 8, 1.7, mileage=1000.0), psa_trip(at(10), 12, 3.7, mileage=1010.0)]
         self.assertEqual(2, len(MergedTrips.get(self.car, [], long_stop)))
         self.assertEqual(2, len(MergedTrips.get(self.car, [], odometer_jump)))

@@ -34,8 +34,8 @@ MAX_END_READING_DELAY = timedelta(hours=1)
 # the level can rise a little while driving (regeneration, temperature), more means a wrong reading
 MAX_LEVEL_GAIN = 2
 # a trip restarted this soon after the previous one ended, where the odometer left it, is the same trip:
-# 23/09/2026 a drive was split in two by 2m49s with the ignition off
-MAX_JOIN_GAP = timedelta(minutes=5)
+# 23/09/2026 a drive was split in two by 2m49s with the ignition off, while two trips were 4m52s apart
+MAX_JOIN_GAP = timedelta(minutes=3)
 MAX_JOIN_MILEAGE_GAP = 0.5  # km
 
 
