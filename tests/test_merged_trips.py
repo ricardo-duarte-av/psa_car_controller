@@ -151,6 +151,53 @@ class TestMergedTrips(unittest.TestCase):
         self.assertEqual([False, False, True], [t.in_progress for t in trips])
         self.assertTrue(trips[2].get_info()["in_progress"])
 
+    def test_trips_where_the_car_didnt_move_are_dropped(self):
+        # 23/09/2026: switched on for 6s, then driven 13s later
+        restart, drive = psa_trip(at(0), 0.1, 0.0, mileage=1000.0), psa_trip(at(0.2), 20, 18.7, mileage=1000.0)
+        trips = MergedTrips.get(self.car, [], [restart, drive])
+        self.assertEqual([18.7], [t.distance for t in trips])
+        self.assertEqual(at(0.2), trips[0].start_at)
+
+    def test_a_trip_just_started_is_kept_before_it_moves(self):
+        starting = psa_trip(at(0), 1, 0.0)
+        starting["done"] = False
+        self.assertEqual(1, len(MergedTrips.get(self.car, [], [starting])))
+
+    def test_a_trip_restarted_after_a_short_stop_is_joined(self):
+        # 23/09/2026: 09:05:16-09:13:50 1.7 km, then 09:16:39-09:28:07 3.7 km on from the same odometer
+        first = psa_trip(at(0), 8, 1.7, fuel=(38.0, 37.0), fuel_cl=(10.0, 588.0), avg_speed=3.5, mileage=1000.0)
+        second = psa_trip(at(11), 12, 3.7, fuel=(37.0, 36.0), fuel_cl=(20.0, 540.0), avg_speed=5.1, mileage=1001.7)
+        later = psa_trip(at(40), 10, 6.2, mileage=1005.4)
+        trips = MergedTrips.get(self.car, [], [first, second, later])
+        self.assertEqual([5.4, 6.2], [round(t.distance, 1) for t in trips])
+        joined = trips[0]
+        self.assertEqual((at(0), at(23)), (joined.start_at, joined.end_at))
+        self.assertAlmostEqual(23 / 60, joined.duration)  # hours, the stop included
+        self.assertAlmostEqual(5.4 / (20 / 60), joined.speed_average, places=5)  # over the 20 min driven
+        self.assertAlmostEqual(0.3, joined.consumption_fuel)
+        self.assertAlmostEqual(0.3 * 100 / 5.4, joined.consumption_fuel_km)
+        self.assertEqual((38.0, 36.0), (joined.start_level_fuel, joined.end_level_fuel))
+        self.assertAlmostEqual(1005.4, joined.mileage)
+        self.assertEqual([1, 2], [t.id for t in trips])
+
+    def test_trips_apart_or_not_following_on_are_not_joined(self):
+        long_stop = [psa_trip(at(0), 8, 1.7, mileage=1000.0), psa_trip(at(14), 12, 3.7, mileage=1001.7)]
+        odometer_jump = [psa_trip(at(0), 8, 1.7, mileage=1000.0), psa_trip(at(10), 12, 3.7, mileage=1010.0)]
+        self.assertEqual(2, len(MergedTrips.get(self.car, [], long_stop)))
+        self.assertEqual(2, len(MergedTrips.get(self.car, [], odometer_jump)))
+
+    def test_the_restart_of_a_trip_being_driven_keeps_it_in_progress(self):
+        first, second = psa_trip(at(0), 8, 1.7, mileage=1000.0), psa_trip(at(11), 5, 2.0, mileage=1001.7)
+        first["done"], second["done"] = True, False
+        trips = MergedTrips.get(self.car, [], [first, second])
+        self.assertEqual([(3.7, True)], [(round(t.distance, 1), t.in_progress) for t in trips])
+
+    def test_a_trip_that_may_still_be_restarted_is_in_progress(self):
+        trip = psa_trip(at(0), 8, 1.7)
+        trip["done"] = True
+        self.assertTrue(MergedTrips.get(self.car, [], [trip], now=at(10))[0].in_progress)
+        self.assertFalse(MergedTrips.get(self.car, [], [trip], now=at(14))[0].in_progress)
+
     def test_without_psa_trips_psacc_ones_are_kept(self):
         trip = psacc_trip(self.car, at(0), at(10))
         self.assertEqual([trip], list(MergedTrips.get(self.car, [trip], None)))

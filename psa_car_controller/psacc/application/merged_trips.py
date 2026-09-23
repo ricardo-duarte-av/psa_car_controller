@@ -6,9 +6,13 @@ route, the temperature, the altitude and battery levels good enough for the elec
 (psa reports none on some hybrids, and its trip battery levels are made up when the battery is
 flat). So each psa trip is the base, enriched with what psacc recorded during it, and a trip only
 psacc saw (psa missed it, or it predates psa's history) is kept as it is.
+
+Psa closes a trip at each ignition off, so its trips are cleaned up first: the ones where the car
+didn't move (switched on and off, or restarted before driving) are dropped, and a trip restarted
+shortly after the previous one ended, with the odometer carrying on, is joined to it.
 """
 from bisect import bisect_left, bisect_right
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from psa_car_controller.common.mylogger import CustomLogger
@@ -29,6 +33,10 @@ BOUNDARY_TOLERANCE = timedelta(minutes=2)
 MAX_END_READING_DELAY = timedelta(hours=1)
 # the level can rise a little while driving (regeneration, temperature), more means a wrong reading
 MAX_LEVEL_GAIN = 2
+# a trip restarted this soon after the previous one ended, where the odometer left it, is the same trip:
+# 23/09/2026 a drive was split in two by 2m49s with the ignition off
+MAX_JOIN_GAP = timedelta(minutes=5)
+MAX_JOIN_MILEAGE_GAP = 0.5  # km
 
 
 class Reading:
@@ -92,16 +100,79 @@ def psa_electric_level(energies):
     return electric["level"]
 
 
+def psa_trip_moved(psa_trip: dict) -> bool:
+    """False for a trip where the car didn't move; the one being driven is kept, it may be starting."""
+    return (psa_trip.get("distance", None) or 0) > 0 or psa_trip.get("done", None) is False
+
+
+def psa_trip_continues(previous: dict, psa_trip: dict) -> bool:
+    """True when psa_trip is previous restarted after a short stop."""
+    stopped_at = parse_psa_date(previous.get("stoppedAt", None))
+    previous_mileage, mileage = previous.get("startMileage", None), psa_trip.get("startMileage", None)
+    if stopped_at is None or previous_mileage is None or mileage is None:
+        return False
+    previous_end_mileage = previous_mileage + (previous.get("distance", None) or 0)
+    return parse_psa_date(psa_trip["startedAt"]) - stopped_at <= MAX_JOIN_GAP \
+        and abs(mileage - previous_end_mileage) <= MAX_JOIN_MILEAGE_GAP
+
+
+def join_psa_trips(first: dict, second: dict) -> dict:
+    """One psa trip from first and its continuation second, in psa's own format and units."""
+    distance = (first.get("distance", None) or 0) + (second.get("distance", None) or 0)
+    # time spent driving, for the average speed: the duration covers the stop as well
+    driving_s = first.get("_driving_s", first.get("duration", None) or 0) + (second.get("duration", None) or 0)
+    started_at, stopped_at = parse_psa_date(first["startedAt"]), parse_psa_date(second.get("stoppedAt", None))
+    consumptions = {}
+    for consumption in (first.get("energyConsumptions", None) or []) + (second.get("energyConsumptions", None) or []):
+        if consumption.get("consumption", None) is not None:
+            energy_type = consumption.get("type", None)
+            consumptions[energy_type] = consumptions.get(energy_type, 0) + consumption["consumption"]
+    joined = dict(second)
+    joined.update({
+        "startedAt": first["startedAt"],
+        "duration": (stopped_at - started_at).total_seconds() if stopped_at else driving_s,
+        "_driving_s": driving_s,
+        "distance": distance,
+        "startMileage": first.get("startMileage", None),
+        "startEnergies": first.get("startEnergies", None),
+        "startPosition": first.get("startPosition", None),
+        "kinetic": {"avgSpeed": distance * 1000 / driving_s if driving_s else 0, "maxSpeed": 0.0},
+        # psa's average is per 100 km in the same unit as the total
+        "energyConsumptions": [{"type": energy_type, "consumption": total,
+                                "avgConsumption": total * 100 / distance if distance else 0}
+                               for energy_type, total in consumptions.items()],
+    })
+    return joined
+
+
+def clean_psa_trips(psa_trips: list, now: datetime) -> list:
+    """Psa's trips, oldest first, without the ones where the car didn't move and with each trip
+    joined to its restarts. The last one stays in progress while it may still be restarted."""
+    cleaned = []
+    for psa_trip in sorted((t for t in psa_trips or [] if parse_psa_date(t.get("startedAt", None))),
+                           key=lambda t: t["startedAt"]):
+        if not psa_trip_moved(psa_trip):
+            continue
+        if cleaned and psa_trip_continues(cleaned[-1], psa_trip):
+            cleaned[-1] = join_psa_trips(cleaned[-1], psa_trip)
+        else:
+            cleaned.append(psa_trip)
+    if cleaned:
+        stopped_at = parse_psa_date(cleaned[-1].get("stoppedAt", None))
+        if stopped_at is not None and now - stopped_at < MAX_JOIN_GAP:
+            cleaned[-1] = dict(cleaned[-1], done=False)
+    return cleaned
+
+
 def overlaps(trip: Trip, start: datetime, end: datetime) -> bool:
     return trip.start_at <= end + BOUNDARY_TOLERANCE and (trip.end_at or trip.start_at) >= start - BOUNDARY_TOLERANCE
 
 
 class MergedTrips:
     @staticmethod
-    def get(car: Car, psacc_trips: List[Trip], psa_trips: Optional[list]) -> Trips:
+    def get(car: Car, psacc_trips: List[Trip], psa_trips: Optional[list], now: Optional[datetime] = None) -> Trips:
         """The merged trips of car, oldest first; psacc's alone when psa's aren't available."""
-        psa_trips = sorted((t for t in psa_trips or [] if parse_psa_date(t.get("startedAt", None))),
-                           key=lambda t: t["startedAt"])
+        psa_trips = clean_psa_trips(psa_trips, now or datetime.now(timezone.utc))
         merged = []
         if psa_trips:
             window_start = parse_psa_date(psa_trips[0]["startedAt"]) - timedelta(days=1)
@@ -136,7 +207,7 @@ class MergedTrips:
         trip.car = car
         trip.source = "psa"
         trip.start_at = parse_psa_date(psa_trip["startedAt"])
-        # psa's duration is in seconds, a trip's in hours
+        # psa's duration is in seconds, a trip's in hours; a joined trip's includes its stops
         duration_s = psa_trip.get("duration", None)
         stopped_at = parse_psa_date(psa_trip.get("stoppedAt", None))
         if duration_s is None and stopped_at is not None:
