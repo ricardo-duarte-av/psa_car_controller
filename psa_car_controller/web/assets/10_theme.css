@@ -589,3 +589,14 @@ html[data-tab=control] .psacc-period { display: none; }
   font-size: 13px;
   line-height: 1.5;
 }
+
+/* the control page's cards keep their black line drawings: lighten them on the dark theme */
+[data-bs-theme=dark] .card-img,
+[data-bs-theme=dark] img[src*="images/"] {
+  filter: invert(0.9);
+}
+
+.card {
+  border-color: var(--psacc-border);
+  border-radius: 16px;
+}
