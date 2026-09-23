@@ -1,0 +1,322 @@
+/* The "Night drive" look: one set of tokens per theme, mapped onto Bootstrap's own variables so its
+   components follow. The theme is data-bs-theme on <html>, set before the page draws (see app.py). */
+
+:root,
+[data-bs-theme=light] {
+  --psacc-bg: #F4F5F7;
+  --psacc-surface: #FFFFFF;
+  --psacc-surface-2: #EEF0F3;
+  --psacc-border: #DDE1E7;
+  --psacc-border-strong: #E3E6EB;
+  --psacc-line: #E3E6EB;
+  --psacc-text: #14171C;
+  --psacc-muted: #5A6270;
+  --psacc-accent: #1F6FD1;
+  --psacc-accent-rgb: 31, 111, 209;
+  --psacc-accent-hover: #1857A6;
+  --psacc-accent-hover-rgb: 24, 87, 166;
+  --psacc-drive: #C96A12;
+  --psacc-danger: #C0362C;
+  --psacc-good: #1D7A4C;
+}
+
+[data-bs-theme=dark] {
+  --psacc-bg: #0E1014;
+  --psacc-surface: #161920;
+  --psacc-surface-2: #1C2029;
+  --psacc-border: #232833;
+  --psacc-border-strong: #272C36;
+  --psacc-line: #1F232C;
+  --psacc-text: #ECEEF2;
+  --psacc-muted: #A3ABB9;
+  --psacc-accent: #5AB0FF;
+  --psacc-accent-rgb: 90, 176, 255;
+  --psacc-accent-hover: #8CC8FF;
+  --psacc-accent-hover-rgb: 140, 200, 255;
+  --psacc-drive: #F29A38;
+  --psacc-danger: #FF7A70;
+  --psacc-good: #5FD39A;
+}
+
+:root,
+[data-bs-theme=light],
+[data-bs-theme=dark] {
+  --bs-body-font-family: Barlow, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --bs-body-bg: var(--psacc-bg);
+  --bs-body-color: var(--psacc-text);
+  --bs-emphasis-color: var(--psacc-text);
+  --bs-secondary-color: var(--psacc-muted);
+  --bs-secondary-bg: var(--psacc-surface-2);
+  --bs-tertiary-bg: var(--psacc-surface-2);
+  --bs-border-color: var(--psacc-border);
+  --bs-link-color: var(--psacc-accent);
+  --bs-link-color-rgb: var(--psacc-accent-rgb);
+  --bs-link-hover-color: var(--psacc-accent-hover);
+  --bs-link-hover-color-rgb: var(--psacc-accent-hover-rgb);
+  --bs-primary: var(--psacc-accent);
+  --bs-primary-rgb: var(--psacc-accent-rgb);
+  --bs-card-bg: var(--psacc-surface);
+  color-scheme: light;
+}
+
+[data-bs-theme=dark] {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--psacc-bg);
+  color: var(--psacc-text);
+}
+
+.num {
+  font-family: "Barlow Semi Condensed", Barlow, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.psacc-muted {
+  color: var(--psacc-muted);
+}
+
+/* icons: an svg used as a mask, painted in the text colour */
+.psacc-icon {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  background-color: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+
+.psacc-icon-sm { width: 16px; height: 16px; }
+.psacc-icon-car { --icon: url(icons/car.svg); }
+.psacc-icon-gauge { --icon: url(icons/gauge.svg); }
+.psacc-icon-route { --icon: url(icons/route.svg); }
+.psacc-icon-bolt { --icon: url(icons/bolt.svg); }
+.psacc-icon-pin { --icon: url(icons/pin.svg); }
+.psacc-icon-lock { --icon: url(icons/lock.svg); }
+.psacc-icon-sun { --icon: url(icons/sun.svg); }
+.psacc-icon-moon { --icon: url(icons/moon.svg); }
+.psacc-icon-monitor { --icon: url(icons/monitor.svg); }
+.psacc-icon-settings { --icon: url(icons/settings.svg); }
+.psacc-icon-tag { --icon: url(icons/tag.svg); }
+.psacc-icon-plug { --icon: url(icons/plug.svg); }
+.psacc-icon-cloud { --icon: url(icons/cloud.svg); }
+.psacc-icon-calendar { --icon: url(icons/calendar.svg); }
+.psacc-icon-download { --icon: url(icons/download.svg); }
+.psacc-icon-chevron-down { --icon: url(icons/chevron-down.svg); }
+.psacc-icon-fuel { --icon: url(icons/fuel.svg); }
+.psacc-icon-x { --icon: url(icons/x.svg); }
+
+/* header */
+.psacc-header {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  height: 64px;
+  padding: 0 40px;
+  margin: 0 calc(-1 * var(--bs-gutter-x, 0.75rem));
+  border-bottom: 1px solid var(--psacc-line);
+  background: var(--psacc-bg);
+}
+
+.psacc-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--psacc-text);
+  text-decoration: none;
+}
+
+.psacc-brand:hover { color: var(--psacc-text); }
+
+.psacc-brand-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--psacc-surface-2);
+  color: var(--psacc-accent);
+}
+
+.psacc-brand-name { font-size: 17px; font-weight: 600; line-height: 20px; }
+.psacc-brand-sub { font-size: 12px; line-height: 16px; color: var(--psacc-muted); }
+
+.psacc-nav {
+  display: flex;
+  gap: 4px;
+}
+
+.psacc-nav a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  color: var(--psacc-muted);
+  font-size: 15px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.psacc-nav a:hover { color: var(--psacc-text); }
+.psacc-nav .psacc-icon { display: none; }
+
+html[data-tab=summary] .psacc-nav a[data-tab=summary],
+html[data-tab=trips] .psacc-nav a[data-tab=trips],
+html[data-tab=charging] .psacc-nav a[data-tab=charging],
+html[data-tab=map] .psacc-nav a[data-tab=map],
+html[data-tab=control] .psacc-nav a[data-tab=control] {
+  background: var(--psacc-surface-2);
+  color: var(--psacc-text);
+}
+
+.psacc-header-end {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.psacc-theme {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--psacc-border-strong);
+  border-radius: 10px;
+  background: var(--psacc-surface);
+}
+
+.psacc-theme button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 38px;
+  height: 36px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--psacc-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.psacc-theme button:hover { color: var(--psacc-text); }
+
+html[data-theme-choice=light] .psacc-theme button[data-choice=light],
+html[data-theme-choice=dark] .psacc-theme button[data-choice=dark],
+html[data-theme-choice=auto] .psacc-theme button[data-choice=auto] {
+  background: var(--psacc-border-strong);
+  color: var(--psacc-text);
+}
+
+.psacc-chip-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--psacc-border-strong);
+  border-radius: 8px;
+  color: var(--psacc-muted);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.psacc-chip-link:hover { color: var(--psacc-text); }
+
+.psacc-icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--psacc-border-strong);
+  border-radius: 10px;
+  background: var(--psacc-surface);
+  color: var(--psacc-text);
+}
+
+.psacc-icon-button:hover { color: var(--psacc-accent); }
+
+/* the dashboard's sections, shown by the url's hash (see theme.js) */
+.psacc-panel { display: none; }
+
+html[data-tab=summary] #panel-summary,
+html[data-tab=trips] #panel-trips,
+html[data-tab=charging] #panel-charging,
+html[data-tab=map] #panel-map,
+html[data-tab=control] #panel-control {
+  display: block;
+}
+
+.psacc-main {
+  padding: 28px 40px;
+}
+
+/* tables (charging) */
+.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td,
+.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner th {
+  background-color: var(--psacc-surface) !important;
+  color: var(--psacc-text) !important;
+  border-color: var(--psacc-border) !important;
+  font-family: "Barlow Semi Condensed", Barlow, sans-serif;
+}
+
+.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner th {
+  color: var(--psacc-muted) !important;
+  font-weight: 600;
+}
+
+.dash-table-container .previous-next-container,
+.dash-table-container .previous-next-container input,
+.dash-table-container .previous-next-container button {
+  background: transparent;
+  color: var(--psacc-text);
+}
+
+/* modals and cards from the other pages */
+.modal-content { background: var(--psacc-surface); color: var(--psacc-text); }
+
+/* phones: the sections move to a bar at the bottom */
+@media (max-width: 767.98px) {
+  .psacc-header { gap: 12px; padding: 0 16px; height: 60px; }
+  .psacc-brand-sub, .psacc-chip-link, .psacc-theme-label { display: none; }
+  .psacc-nav {
+    position: fixed;
+    z-index: 1030;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    height: 68px;
+    gap: 0;
+    border-top: 1px solid var(--psacc-line);
+    background: var(--psacc-surface);
+  }
+  .psacc-nav a {
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    padding: 0;
+    border-radius: 0;
+    font-size: 11px;
+  }
+  .psacc-nav .psacc-icon { display: inline-block; width: 22px; height: 22px; }
+  html[data-tab] .psacc-nav a[data-tab] { background: transparent; }
+  html[data-tab=summary] .psacc-nav a[data-tab=summary],
+  html[data-tab=trips] .psacc-nav a[data-tab=trips],
+  html[data-tab=charging] .psacc-nav a[data-tab=charging],
+  html[data-tab=map] .psacc-nav a[data-tab=map],
+  html[data-tab=control] .psacc-nav a[data-tab=control] {
+    background: transparent;
+    color: var(--psacc-accent);
+  }
+  body { padding-bottom: 68px; }
+  .psacc-main { padding: 16px; }
+}

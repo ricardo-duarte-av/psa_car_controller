@@ -94,7 +94,7 @@ function updateFigures (data, oldFigure, x, y) {
       figure.data[j].x = xValues
     }
     console.log(xLabel, figure)
-    figures.push(figure)
+    figures.push(window.psaccTheme ? window.psaccTheme.themeFigure(figure) : figure)
   })
   return figures
 }
@@ -124,7 +124,7 @@ function updateMap (data, oldFigure, x, y, lastPos) {
       figure.data[1].lon = [lastPos.lon]
     }
     console.log(xLabel, figure)
-    figures.push(figure)
+    figures.push(window.psaccTheme ? window.psaccTheme.themeFigure(figure) : figure)
   })
   return figures
 }

@@ -23,6 +23,42 @@ else:
 app = None
 dash_app = None
 
+FONTS_URL = "https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700" \
+            "&family=Barlow+Semi+Condensed:wght@500;600&display=swap"
+# sets the theme (the one chosen, else the browser's) and the dashboard's section before the page
+# draws, so it doesn't flash; assets/theme.js keeps them up to date afterwards
+INDEX_STRING = """<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        <script>
+            (function () {
+                var choice = "auto";
+                try { choice = localStorage.getItem("psacc-theme") || "auto"; } catch (e) {}
+                if (["light", "dark", "auto"].indexOf(choice) < 0) choice = "auto";
+                var dark = choice === "dark" ||
+                    (choice === "auto" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+                var root = document.documentElement;
+                root.setAttribute("data-theme-choice", choice);
+                root.setAttribute("data-bs-theme", dark ? "dark" : "light");
+                var tab = window.location.hash.replace("#", "");
+                root.setAttribute("data-tab", tab || "summary");
+            })();
+        </script>
+        {%css%}
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>"""
+
 logger = logging.getLogger(__name__)
 
 
@@ -81,10 +117,11 @@ def config_flask(title, base_path, debug: bool, host, port, reloader=False,
     else:
         application = DispatcherMiddleware(Flask('dummy_app'), {base_path: app})
         requests_pathname_prefix = base_path + "/"
-    dash_app = Dash(external_stylesheets=[dbc.themes.BOOTSTRAP, dbc.icons.BOOTSTRAP],
+    dash_app = Dash(external_stylesheets=[dbc.themes.BOOTSTRAP, dbc.icons.BOOTSTRAP, FONTS_URL],
                     external_scripts=locale_url, title=title,
                     server=app, requests_pathname_prefix=requests_pathname_prefix,
                     suppress_callback_exceptions=True)
+    dash_app.index_string = INDEX_STRING
     dash_app.enable_dev_tools(debug)
     app.wsgi_app = MyProxyFix(dash_app, base_path)
     # keep this line

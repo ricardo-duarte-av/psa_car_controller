@@ -52,24 +52,54 @@ def get_default_car() -> Car:
     return APP.myp.vehicles_list[0]
 
 
+# the dashboard's sections: (url hash, label, icon)
+TABS = [("summary", "Summary", "gauge"), ("trips", "Trips", "route"), ("charging", "Charging", "bolt"),
+        ("map", "Map", "pin"), ("control", "Control", "lock")]
+
+
+def icon(name, small=False):
+    """An icon from assets/icons, painted in the text colour."""
+    return html.Span(className=f"psacc-icon psacc-icon-{name}" + (" psacc-icon-sm" if small else ""),
+                     **{"aria-hidden": "true"})
+
+
+def theme_switch():
+    """Light, dark or auto (the browser's): assets/theme.js does the switching."""
+    def button(choice, label, icon_name, text=None):
+        children = [icon(icon_name)] + ([html.Span(text, className="psacc-theme-label")] if text else [])
+        return html.Button(children, type="button", role="radio", title=label,
+                           **{"aria-label": label, "aria-checked": "false", "data-choice": choice})
+    return html.Div([button("light", "Light theme", "sun"), button("dark", "Dark theme", "moon"),
+                     button("auto", "Match the system", "monitor", "Auto")],
+                    role="radiogroup", className="psacc-theme", **{"aria-label": "Theme"})
+
+
+def car_name() -> str:
+    try:
+        car = get_default_car()
+    except (IndexError, AttributeError):
+        return "My car"
+    return " ".join(part for part in (car.brand, car.label) if part) or "My car"
+
+
 def add_header(el):
     version = "v" + __version__
-    github_url = RELEASES_URL + version
-    dbc_version = dbc.Button(html.I(version, className="m-1"),
-                             size='sm',
-                             color="secondary",
-                             className="me-1 bi bi-github",
-                             external_link=True, href=github_url)
-    return dbc.Row([dbc.Col(dcc.Link(html.H1('My car info'), href=dash_app.get_relative_path("/"),
-                                     style={"TextDecoration": "none"})),
-                    dbc.Col(html.Div([dbc_version,
-                                      dcc.Link(
-                                          html.Img(src=dash_app.get_asset_url("images/settings.svg"),
-                                                   width="30veh"),
-                                          href=dash_app.get_relative_path("/config"),
-                                          className="float-end")],
-                                     className="d-grid gap-2 d-md-flex justify-content-md-end",))],
-                   className='align-items-center'), el
+    home = dash_app.get_relative_path("/")
+    header = html.Header(className="psacc-header", children=[
+        html.A(href=home + "#summary", className="psacc-brand", children=[
+            html.Span(icon("car"), className="psacc-brand-mark"),
+            html.Div([html.Div(car_name(), className="psacc-brand-name"),
+                      html.Div("PSA Car Controller", className="psacc-brand-sub")])]),
+        html.Nav([html.A([icon(icon_name), label], href=f"{home}#{tab}", **{"data-tab": tab})
+                  for tab, label, icon_name in TABS],
+                 className="psacc-nav", **{"aria-label": "Sections"}),
+        html.Div(className="psacc-header-end", children=[
+            theme_switch(),
+            html.A([icon("tag", small=True), html.Span(version, className="num")], href=RELEASES_URL + version,
+                   target="_blank", rel="noopener", className="psacc-chip-link", title="Release notes"),
+            dcc.Link([icon("settings"), html.Span("Settings", className="visually-hidden")],
+                     href=dash_app.get_relative_path("/config"), className="psacc-icon-button", title="Settings")])])
+    return header, el
 
 
 @dash_app.callback(Output('page-content', 'children'),
@@ -298,15 +328,15 @@ def serve_layout():
         stores = fig_filter.get_store({"minimumLength": APP.config.General.minimum_trip_length}) if fig_filter else []
         data_div = html.Div([
             *stores,
-            html.Div([
+            html.Main(className="psacc-main", children=[
                 dbc.Row(
                     children=range_slider,
                     style={"paddingLeft": "40px", "paddingRight": "40px", "height": "50px"},
                 ),
-                dbc.Tabs([
-                    dbc.Tab(label="Summary", tab_id="summary", children=summary_tab),
-                    dbc.Tab(label="Trips", tab_id="trips", id="tab_trips",
-                            children=[dbc.Row(
+                html.Div([
+                    html.Div(id="panel-summary", className="psacc-panel", children=summary_tab),
+                    html.Div(id="panel-trips", className="psacc-panel",
+                             children=[dbc.Row(
                                 dbc.Col([
                                     dcc.Loading(
                                         id="loading-div-trips",
@@ -340,8 +370,8 @@ def serve_layout():
                                 size="xl",
                             )
                             ]),
-                    dbc.Tab(label="Charge", tab_id="charge", id="tab_charge",
-                            children=[dbc.Row(
+                    html.Div(id="panel-charging", className="psacc-panel",
+                             children=[dbc.Row(
                                 dbc.Col([
                                     dcc.Loading(
                                         id="loading-div-battery",
@@ -376,17 +406,14 @@ def serve_layout():
                                 size="xl",
                             )
                             ]),
-                    dbc.Tab(label="Map", tab_id="map", children=[maps]),
-                    dbc.Tab(label="Control", tab_id="control", children=html.Iframe(
+                    html.Div(id="panel-map", className="psacc-panel", children=[maps]),
+                    html.Div(id="panel-control", className="psacc-panel", children=html.Iframe(
                         src=dash_app.config.requests_pathname_prefix + "control?header=false",
-                        style={"position": "absolute",
-                               "height": "100%",
+                        title="Control",
+                        style={"height": "calc(100vh - 180px)",
                                "width": "100%",
                                "border": "none"}))
-                ],
-                    id="tabs",
-                    active_tab="summary",
-                    persistence=True),
+                ]),
                 html.Div(id=EMPTY_DIV)
             ])])
         cached_layout = data_div

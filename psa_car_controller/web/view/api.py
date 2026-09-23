@@ -25,7 +25,7 @@ from psa_car_controller.web.tools.utils import convert_to_number_if_number_else_
 
 logger = logging.getLogger(__name__)
 
-STYLE_CACHE = None
+STYLE_CACHE = {}
 APP = PSACarController()
 COMMAND_MAX_WAIT = 30
 
@@ -80,15 +80,16 @@ def get_vehicle_info(vin):
 
 
 @app.route("/style.json")
+@app.route("/style-dark.json")
 def get_style():
-    global STYLE_CACHE
-    if not STYLE_CACHE:
-        with open(app.root_path + "/assets/style.json", "r", encoding="utf-8") as f:
-            res = json.loads(f.read())
-            STYLE_CACHE = res
-    url_root = request.url_root
-    STYLE_CACHE["sprite"] = url_root + "assets/sprites/osm-liberty"
-    return jsonify(STYLE_CACHE)
+    """The map's style, light or dark, with the sprites' url for this host."""
+    name = request.path.rsplit("/", 1)[-1]
+    if name not in STYLE_CACHE:
+        with open(app.root_path + "/assets/" + name, "r", encoding="utf-8") as f:
+            STYLE_CACHE[name] = json.loads(f.read())
+    style = dict(STYLE_CACHE[name])
+    style["sprite"] = request.url_root + "assets/sprites/osm-liberty"
+    return jsonify(style)
 
 
 @app.route('/charge_now/<string:vin>/<int:charge>')
