@@ -172,6 +172,11 @@
 
   window.addEventListener('hashchange', applyTab)
 
+  // chosen in another page of the app (the control section is one, in a frame)
+  window.addEventListener('storage', event => {
+    if (event.key === KEY) applyTheme(choice())
+  })
+
   // dash renders the page after this runs, and re-renders parts of it
   let pending = false
   new window.MutationObserver(() => {

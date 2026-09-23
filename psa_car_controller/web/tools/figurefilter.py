@@ -43,6 +43,8 @@ class FigureFilter:
         self.tables = []
         self.maps = []
         self.src = {}
+        # the datetime columns of the datasets no table shows
+        self.dataset_dates = {}
 
     def add_map(self, dash_Graph, latitude, longitude, figure):
         self.maps.append(Graph(dash_Graph.id, latitude, longitude, figure))
@@ -55,8 +57,13 @@ class FigureFilter:
     def add_table(self, table_id, src, date_columns, figure):
         self.tables.append(Table(table_id, src, date_columns, figure))
 
+    def add_dataset_dates(self, src, date_columns):
+        """Datetime columns to localise in a dataset that no table shows (the map reads them)."""
+        self.dataset_dates[src] = date_columns
+
     def __get_table_date_column_id(self):
-        res = {table.src: table.date_columns for table in self.tables}
+        res = dict(self.dataset_dates)
+        res.update({table.src: table.date_columns for table in self.tables})
         return res
 
     def __get_figures(self):

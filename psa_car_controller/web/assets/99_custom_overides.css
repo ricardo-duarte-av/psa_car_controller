@@ -1,13 +1,8 @@
-#battery-table button.export,
-#trips-table button.export {
+/* the charging table's own export button: the page shows its own ("Export CSV") that clicks it */
+#battery-table button.export {
   display: none;
 }
 
-div.export-load-anim .dash-loading-spinner {
-  width: 20px;
-  height: 20px;
-}
-
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner tr:hover > td:not(.focused) {
-  background-image: linear-gradient(#ffeb3b75 0 0);
+  background-image: linear-gradient(rgba(var(--psacc-accent-rgb), 0.10) 0 0);
 }

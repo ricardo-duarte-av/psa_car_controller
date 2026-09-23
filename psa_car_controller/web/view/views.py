@@ -4,10 +4,9 @@ from typing import List
 from urllib.parse import parse_qs, urlparse
 
 import dash_bootstrap_components as dbc
-from dash import dcc, html
-from dash.dependencies import Output, Input, State
+from dash import callback_context, dcc, html
+from dash.dependencies import ALL, Output, Input, State
 from dash.exceptions import PreventUpdate
-import time
 
 from psa_car_controller.common import utils
 from psa_car_controller.common.mylogger import CustomLogger
@@ -164,36 +163,22 @@ def create_callback():  # noqa: MC0001
                     return figures.get_battery_curve_fig(row, APP.myp.vehicles_list[0]), True
             return "", False
 
-        @dash_app.callback([Output("tab_trips_popup_graph", "children"), Output("tab_trips_popup", "is_open"), ],
-                           [Input("trips-table", "active_cell"),
+        @dash_app.callback([Output("tab_trips_popup_graph", "children"), Output("tab_trips_popup", "is_open")],
+                           [Input({"type": "trip-details", "index": ALL}, "n_clicks"),
                             Input("tab_trips_popup-close", "n_clicks")],
-                           State("tab_trips_popup", "is_open"))
-        def get_altitude_graph(active_cell, close, is_open):  # pylint: disable=unused-argument
-            if is_open is None:
-                is_open = False
-            if active_cell is not None and active_cell["column_id"] in ["altitude_diff"] and not is_open:
-                return figures.get_altitude_fig(trips[active_cell["row_id"] - 1]), True
-            return "", False
+                           prevent_initial_call=True)
+        def show_trip(details_clicks, close):  # pylint: disable=unused-argument
+            triggered = callback_context.triggered_id
+            if not isinstance(triggered, dict):
+                return "", False  # closed
+            if not callback_context.triggered[0]["value"]:
+                raise PreventUpdate  # the list was drawn again
+            trip = next((t for t in trips if t.id == triggered["index"]), None)
+            if trip is None:
+                return dbc.Alert("This trip is no longer recorded, reload the page.", color="warning"), True
+            return dashboard.trip_details(trip), True
 
-        @dash_app.callback(Output("loading-output-trips", "children"), Input("export-trips-table", "n_clicks"))
-        def export_trips_loading_animation(n_clicks):  # pylint: disable=unused-argument
-            time.sleep(3)
-
-        @dash_app.callback(Output("loading-output-battery", "children"), Input("export-battery-table", "n_clicks"))
-        def export_batt_loading_animation(n_clicks):  # pylint: disable=unused-argument
-            time.sleep(3)
         # Emulate click on original Export datatables button, since original button is hard to modify
-        dash_app.clientside_callback(
-            """
-            function(n_clicks) {
-                if (n_clicks > 0)
-                    document.querySelector("#trips-table button.export").click()
-                return ""
-            }
-            """,
-            Output("trips-table", "data-dummy"),
-            [Input("export-trips-table", "n_clicks")]
-        )
         dash_app.clientside_callback(
             """
             function(n_clicks) {
@@ -226,7 +211,7 @@ def new_fig_filter():
                              ["consumption_km"] * 2, figures.consumption_fig_by_temp)]
     trips_map = fig_filter.add_map(dcc.Graph(id="trips_map", style={"height": '90vh'}), "lat",
                                    ["long", "start_at_str"], figures.trips_map)
-    fig_filter.add_table(figures.TRIPS_TABLE_ID, "trips", figures.TRIPS_DATE_COLUMNS, figures.table_fig)
+    fig_filter.add_dataset_dates("trips", figures.TRIPS_DATE_COLUMNS)
     fig_filter.add_table(figures.CHARGINGS_TABLE_ID, "chargings", figures.CHARGINGS_DATE_COLUMNS,
                          figures.battery_table)
     return fig_filter, graphs, trips_map
@@ -327,77 +312,9 @@ def serve_layout():
                 dashboard.period_picker(range_slider) if fig_filter else html.Div(),
                 html.Div([
                     html.Div(id="panel-summary", className="psacc-panel", children=summary_tab),
-                    html.Div(id="panel-trips", className="psacc-panel",
-                             children=[dbc.Row(
-                                dbc.Col([
-                                    dcc.Loading(
-                                        id="loading-div-trips",
-                                        children=[html.Div([html.Div(id="loading-output-trips")])],
-                                        type="circle",
-                                        parent_className="export-load-anim"
-                                    ),
-                                    dbc.Button("Export trips data",
-                                               id="export-trips-table",
-                                               n_clicks=0,
-                                               size="sm",
-                                               color="light",
-                                               className="m-1 w-200"
-                                               )],
-                                    className="d-grid gap-2 d-md-flex justify-content-md-end"
-                                )
-                            ),
-                                html.Div(id="tab_trips_fig", children=figures.table_fig),
-                                dbc.Modal(
-                                [
-                                    dbc.ModalHeader("Altitude"),
-                                    dbc.ModalBody(html.Div(
-                                                  id="tab_trips_popup_graph")),
-                                    dbc.ModalFooter(
-                                        dbc.Button("Close",
-                                                   id="tab_trips_popup-close",
-                                                   className="ms-auto")
-                                    ),
-                                ],
-                                id="tab_trips_popup",
-                                size="xl",
-                            )
-                            ]),
+                    html.Div(id="panel-trips", className="psacc-panel", children=dashboard.trips_panel()),
                     html.Div(id="panel-charging", className="psacc-panel",
-                             children=[dbc.Row(
-                                dbc.Col([
-                                    dcc.Loading(
-                                        id="loading-div-battery",
-                                        children=[html.Div([html.Div(id="loading-output-battery")])],
-                                        type="circle",
-                                        parent_className="export-load-anim"
-                                    ),
-                                    dbc.Button("Export charging data",
-                                               id="export-battery-table",
-                                               n_clicks=0,
-                                               size="sm",
-                                               color="light",
-                                               className="m-1 w-200"
-                                               )],
-                                    className="d-grid gap-2 d-md-flex justify-content-md-end"
-                                )
-                            ),
-                                figures.battery_table,
-                                dbc.Modal(
-                                [
-                                    dbc.ModalHeader(
-                                        "Charging speed"),
-                                    dbc.ModalBody(html.Div(
-                                                  id="tab_battery_popup_graph")),
-                                    dbc.ModalFooter(
-                                        dbc.Button("Close",
-                                                   id="tab_battery_popup-close",
-                                                   className="ms-auto")
-                                    ),
-                                ],
-                                id="tab_battery_popup",
-                                size="xl",
-                            )
-                            ]),
+                             children=dashboard.charging_panel(figures.battery_table)),
                     html.Div(id="panel-map", className="psacc-panel", children=[maps]),
                     html.Div(id="panel-control", className="psacc-panel", children=html.Iframe(
                         src=dash_app.config.requests_pathname_prefix + "control?header=false",

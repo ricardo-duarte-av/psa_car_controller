@@ -329,9 +329,9 @@ class TestUnit(unittest.TestCase):
     def test_the_table_date_columns_match_the_tables(self):
         from psa_car_controller.web import figures
         figures.get_figures(self.vehicule_list[0])
-        for table, date_columns in ((figures.table_fig, figures.TRIPS_DATE_COLUMNS),
-                                    (figures.battery_table, figures.CHARGINGS_DATE_COLUMNS)):
-            self.assertEqual(date_columns, [col["id"][:-4] for col in table.columns if col["type"] == "datetime"])
+        table = figures.battery_table
+        self.assertEqual(figures.CHARGINGS_DATE_COLUMNS,
+                         [col["id"][:-4] for col in table.columns if col["type"] == "datetime"])
 
     def test_fuel_car(self):
         get_new_test_db()

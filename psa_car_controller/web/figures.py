@@ -16,9 +16,8 @@ from psa_car_controller.psacc.repository.db import Database
 # pylint: disable=invalid-name
 from psa_car_controller.web.tools.utils import dash_date_to_datetime
 
-TRIPS_TABLE_ID = "trips-table"
 CHARGINGS_TABLE_ID = "battery-table"
-# the datetime columns of each table, shown as <column>_str
+# the datetime columns of each dataset, also given as <column>_str in the browser's locale
 TRIPS_DATE_COLUMNS = ["start_at"]
 CHARGINGS_DATE_COLUMNS = ["start_at", "stop_at"]
 
@@ -29,7 +28,6 @@ consumption_df = ERROR_DIV
 trips_map = ERROR_DIV
 consumption_fig_by_speed = ERROR_DIV
 consumption_fig_by_temp = ERROR_DIV
-table_fig = ERROR_DIV
 info = ""
 battery_table = ERROR_DIV
 
@@ -44,8 +42,8 @@ CURRENCY = "€"
 EXPORT_FORMAT = "csv"
 
 
-def get_figures(car: Car):
-    global consumption_fig, trips_map, consumption_fig_by_speed, table_fig, battery_table, consumption_fig_by_temp
+def get_figures(car: Car):  # pylint: disable=unused-argument
+    global consumption_fig, trips_map, consumption_fig_by_speed, battery_table, consumption_fig_by_temp
     lats = [42, 41]
     lons = [1, 2]
     names = ["undefined", "undefined"]
@@ -62,64 +60,7 @@ def get_figures(car: Car):
         marker={"symbol": "marker", "size": 20},
         lon=[lons[0]], lat=[lats[0]],
         showlegend=False, name="Last Position"))
-    # table
     nb_format = Format(precision=2, scheme=Scheme.fixed, symbol=Symbol.yes, group=Group.yes)
-    style_cell_conditional = []
-    if car.is_electric():
-        style_cell_conditional.append({'if': {'column_id': 'consumption_fuel_km', }, 'display': 'None', })
-        style_cell_conditional.append({'if': {'column_id': 'consumption_fuel', }, 'display': 'None', })
-    if car.is_thermal():
-        style_cell_conditional.append({'if': {'column_id': 'consumption_km', }, 'display': 'None', })
-        for column_id in ('start_level', 'end_level'):
-            style_cell_conditional.append({'if': {'column_id': column_id, }, 'display': 'None', })
-    table_fig = DataTable(
-        id=TRIPS_TABLE_ID,
-        export_format=EXPORT_FORMAT,
-        sort_action='custom',
-        sort_by=[{'column_id': 'id', 'direction': 'desc'}],
-        style_data={
-            'width': '10%',
-            'maxWidth': '10%',
-            'minWidth': '10%',
-            'color': 'gray'
-        },
-        columns=[{'id': 'id', 'name': '#', 'type': 'numeric'},
-                 {'id': 'start_at_str', 'name': 'start at', 'type': 'datetime'},
-                 {'id': 'duration', 'name': 'duration', 'type': 'numeric',
-                  'format': deepcopy(nb_format).symbol_suffix(" min").precision(0)},
-                 {'id': 'speed_average', 'name': 'avg. speed', 'type': 'numeric',
-                  'format': deepcopy(nb_format).symbol_suffix(" km/h").precision(0)},
-                 {'id': 'consumption_km', 'name': 'avg. consumption', 'type': 'numeric',
-                  'format': deepcopy(nb_format).symbol_suffix(" kWh/100km")},
-                 {'id': 'consumption_fuel_km', 'name': 'average consumption fuel', 'type': 'numeric',
-                  'format': deepcopy(nb_format).symbol_suffix(" L/100km")},
-                 {'id': 'distance', 'name': 'distance', 'type': 'numeric',
-                  'format': nb_format.symbol_suffix(" km").precision(1)},
-                 {'id': 'start_level', 'name': 'battery start', 'type': 'numeric',
-                  'format': deepcopy(nb_format).symbol_suffix(" %").precision(0)},
-                 {'id': 'end_level', 'name': 'battery end', 'type': 'numeric',
-                  'format': deepcopy(nb_format).symbol_suffix(" %").precision(0)},
-                 {'id': 'consumption_fuel', 'name': 'fuel', 'type': 'numeric',
-                  'format': deepcopy(nb_format).symbol_suffix(" L").precision(2)},
-                 {'id': 'mileage', 'name': 'mileage', 'type': 'numeric',
-                  'format': nb_format},
-                 {'id': 'altitude_diff', 'name': 'altitude diff', 'type': 'numeric',
-                  'format': deepcopy(nb_format).symbol_suffix(" m").precision(0)}
-                 ],
-        style_data_conditional=[
-            {
-                'if': {'column_id': ['id']},
-                'width': '5%'
-            },
-            {
-                'if': {'column_id': ['altitude_diff']},
-                'color': 'black'
-            }
-        ],
-        style_cell_conditional=style_cell_conditional,
-        data=[],
-        page_size=50
-    )
     # consumption_fig
     consumption_fig = px.histogram(x=[0], y=[1], title='Consumption of the car',
                                    histfunc="avg")
@@ -143,8 +84,10 @@ def get_figures(car: Car):
             'width': '10%',
             'maxWidth': '10%',
             'minWidth': '10%',
-            'color': 'gray'
+            'color': 'var(--psacc-muted)',
+            'backgroundColor': 'var(--psacc-surface)'
         },
+        style_header={'backgroundColor': 'var(--psacc-surface)', 'color': 'var(--psacc-muted)', 'fontWeight': 600},
         sort_by=[{'column_id': 'start_at_str', 'direction': 'desc'}],
         columns=[{'id': 'start_at_str', 'name': 'start at', 'type': 'datetime'},
                  {'id': 'stop_at_str', 'name': 'stop at', 'type': 'datetime'},
@@ -160,39 +103,40 @@ def get_figures(car: Car):
                  {'id': 'price', 'name': 'price', 'type': 'numeric',
                   'format': deepcopy(nb_format).symbol_suffix(" " + CURRENCY).precision(2), 'editable': True},
                  {'id': 'charging_mode', 'name': 'charging mode', 'type': 'text'},
-                 {'id': 'mileage', 'name': 'mileage', 'type': 'numeric', 'format': nb_format},
+                 {'id': 'mileage', 'name': 'mileage', 'type': 'numeric',
+                  'format': deepcopy(nb_format).symbol_suffix(" km").precision(1)},
                  ],
         data=[],
         page_size=50,
         style_data_conditional=[
             {
                 'if': {'column_id': ['start_level', "end_level"]},
-                'color': 'black'
+                'color': 'var(--psacc-text)'
             },
             {
                 'if': {
                     'filter_query': '{start_level} < 15',
                     'column_id': 'start_level'
                 },
-                'color': 'red'
+                'color': 'var(--psacc-danger)'
             },
             {
                 'if': {
                     'filter_query': '{end_level} > 85',
                     'column_id': 'end_level'
                 },
-                'color': 'green'
+                'color': 'var(--psacc-good)'
             },
             {
                 'if': {
                     'filter_query': '{charging_mode} = "Quick"'
                 },
-                'backgroundColor': 'ivory'
+                'backgroundColor': 'rgba(var(--psacc-accent-rgb), 0.08)'
             },
             {
                 'if': {'column_id': 'price'},
-                'color': 'dodgerblue',
-                'font-weihgt': 'bold'
+                'color': 'var(--psacc-accent)',
+                'fontWeight': 600
             }
         ],
     )
@@ -216,7 +160,7 @@ def get_battery_curve_fig(row: dict, car: Car):
     battery_curves_dict = list(map(lambda bc: bc.__dict__, battery_curves))
     fig = px.line(battery_curves_dict, x="level", y="speed")
     fig.update_layout(xaxis_title="Battery %", yaxis_title="Charging speed in kW")
-    return html.Div(Graph(figure=fig))
+    return html.Div(Graph(figure=fig, config={"displayModeBar": False}, responsive=True))
 
 
 def get_altitude_fig(trip: Trip):
@@ -229,5 +173,6 @@ def get_altitude_fig(trip: Trip):
     for line in res:
         line[0] = line[0] - start_mileage
     fig = px.line(res, x=0, y=1)
-    fig.update_layout(xaxis_title="Distance km", yaxis_title="Altitude m")
-    return html.Div(Graph(figure=fig))
+    fig.update_layout(xaxis_title="Distance km", yaxis_title="Altitude m", margin={"t": 10, "b": 40, "l": 50, "r": 10},
+                      height=280)
+    return html.Div(Graph(figure=fig, config={"displayModeBar": False}, responsive=True))

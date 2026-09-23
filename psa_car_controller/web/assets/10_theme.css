@@ -259,17 +259,21 @@ html[data-tab=control] #panel-control {
 }
 
 /* tables (charging) */
+/* the table's own colours (figures.py) stay inline, over these */
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td,
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner th {
-  background-color: var(--psacc-surface) !important;
-  color: var(--psacc-text) !important;
   border-color: var(--psacc-border) !important;
   font-family: "Barlow Semi Condensed", Barlow, sans-serif;
 }
 
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner th {
-  color: var(--psacc-muted) !important;
+  color: var(--psacc-muted);
   font-weight: 600;
+}
+
+.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner input {
+  background: var(--psacc-surface-2);
+  color: var(--psacc-text);
 }
 
 .dash-table-container .previous-next-container,
@@ -331,6 +335,7 @@ html[data-tab=control] #panel-control {
 
 .psacc-card-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -462,4 +467,125 @@ html[data-tab=control] #panel-control {
   .psacc-card { padding: 14px 16px; }
   .psacc-segmented { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); width: 100%; }
   .psacc-seg { padding: 0 4px; }
+}
+
+/* buttons */
+.psacc-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--psacc-border-strong);
+  border-radius: 10px;
+  background: var(--psacc-surface);
+  color: var(--psacc-text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.psacc-button:hover { color: var(--psacc-accent); }
+.psacc-icon-button-flat { border-color: transparent; background: transparent; color: var(--psacc-muted); }
+
+.psacc-list-toolbar { justify-content: space-between; margin-bottom: 16px; }
+.psacc-section-title { margin: 8px 0 12px; font-size: 16px; font-weight: 600; }
+.psacc-empty { color: var(--psacc-muted); }
+.psacc-table-card { padding: 8px; overflow-x: auto; }
+
+/* the trips, by day */
+.psacc-trips-days { display: flex; flex-direction: column; gap: 16px; }
+.psacc-day { padding: 0; overflow: hidden; }
+
+.psacc-day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 24px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.psacc-day-head::-webkit-details-marker { display: none; }
+.psacc-day[open] .psacc-day-head { border-bottom: 1px solid var(--psacc-border); }
+.psacc-day-title { font-size: 17px; font-weight: 600; }
+.psacc-day-totals { display: flex; align-items: center; gap: 12px; }
+.psacc-day-chevron { transition: transform 0.15s; color: var(--psacc-muted); align-self: center; }
+.psacc-day[open] .psacc-day-chevron { transform: rotate(180deg); }
+
+.psacc-trip-row {
+  display: grid;
+  grid-template-columns: 150px 90px 90px 100px minmax(200px, 1.6fr) 110px 80px 44px;
+  align-items: center;
+  column-gap: 16px;
+  min-height: 54px;
+  padding: 4px 24px;
+  border-bottom: 1px solid var(--psacc-line);
+  font-size: 15px;
+}
+
+.psacc-trip-row:last-child { border-bottom: none; }
+
+.psacc-trip-columns {
+  min-height: 0;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  color: var(--psacc-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.psacc-col-distance { font-size: 16px; font-weight: 600; }
+.psacc-trip-columns .psacc-col-distance { font-size: 12px; }
+.psacc-col-battery { display: flex; align-items: center; gap: 12px; }
+.psacc-col-action { display: flex; justify-content: flex-end; }
+.psacc-no-fuel .psacc-col-fuel,
+.psacc-no-battery .psacc-col-battery,
+.psacc-no-battery .psacc-col-energy { visibility: hidden; }
+
+.psacc-level {
+  position: relative;
+  flex-shrink: 0;
+  width: 120px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--psacc-border);
+}
+
+.psacc-level-used { position: absolute; top: 0; height: 8px; border-radius: 4px; background: var(--psacc-accent); }
+.psacc-level-mark { position: absolute; top: -2px; width: 4px; height: 12px; margin-left: -2px; border-radius: 2px; background: var(--psacc-accent); }
+.psacc-chip-live { background: rgba(var(--psacc-accent-rgb), 0.18); color: var(--psacc-accent); }
+
+@media (max-width: 991.98px) {
+  .psacc-trip-row.psacc-trip-columns { display: none; }
+  .psacc-trip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    padding: 12px 16px;
+  }
+  .psacc-col-time { flex-basis: 100%; font-weight: 600; }
+  .psacc-col-action { margin-left: auto; }
+  .psacc-no-fuel .psacc-col-fuel,
+  .psacc-no-battery .psacc-col-battery,
+  .psacc-no-battery .psacc-col-energy { display: none; }
+  .psacc-day-head { padding: 14px 16px; }
+}
+
+/* the period only filters the summary, trips, charging and map */
+html[data-tab=control] .psacc-period { display: none; }
+
+/* the log (settings) */
+.psacc-log {
+  padding: 16px;
+  border: 1px solid var(--psacc-border);
+  border-radius: 12px;
+  background: var(--psacc-surface);
+  color: var(--psacc-text);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
 }

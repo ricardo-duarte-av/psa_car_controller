@@ -1,10 +1,11 @@
 """Building blocks of the dashboard's "Night drive" look, and the callbacks drawing its summary.
 
-The summary's figures are computed in the browser (assets/clientside.js) from the stores the page
-already holds, like the rest of the dashboard, so choosing a period doesn't go back to the server.
+The summary's figures and the trips list are computed in the browser (assets/summary.js, trips.js)
+from the stores the page already holds, like the rest of the dashboard, so choosing a period doesn't
+go back to the server.
 """
 from dash import dcc, html
-from dash.dependencies import Input, Output, State
+from dash.dependencies import ALL, Input, Output, State
 import dash_bootstrap_components as dbc
 
 from psa_car_controller.web import figures
@@ -109,6 +110,57 @@ def summary_panel(graphs):
     ]
 
 
+def export_button(button_id):
+    return html.Button([icon("download", small=True), html.Span("Export CSV")], id=button_id, type="button",
+                       n_clicks=0, className="psacc-button")
+
+
+def trips_panel():
+    """The trips by day, newest first (drawn in the browser), and the details of one."""
+    return [
+        html.Div(className="psacc-toolbar psacc-list-toolbar", children=[
+            html.Span(id="trips-count", className="psacc-muted"),
+            export_button("export-trips-csv"),
+            dcc.Download(id="trips-download"),
+        ]),
+        html.Div(id="trips-list", className="psacc-trips"),
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle(id="tab_trips_popup-title")),
+            dbc.ModalBody([
+                html.H3("Route", className="psacc-section-title"),
+                html.Div(dcc.Graph(id="trip-route-graph", config={"displayModeBar": False}, responsive=True,
+                                   style={"height": "320px"}), id="trip-route-box"),
+                html.P("No route recorded for this trip: the car's position wasn't updated while it drove.",
+                       id="trip-route-none", className="psacc-muted"),
+                html.H3("Altitude", className="psacc-section-title"),
+                html.Div(id="tab_trips_popup_graph"),
+            ]),
+            dbc.ModalFooter(dbc.Button("Close", id="tab_trips_popup-close", className="ms-auto")),
+        ], id="tab_trips_popup", size="lg", scrollable=True),
+    ]
+
+
+def trip_details(trip):
+    """A trip's altitude; its route is drawn in the browser, from the positions the page holds."""
+    return figures.get_altitude_fig(trip)
+
+
+def charging_panel(table):
+    return [
+        html.Div(className="psacc-toolbar psacc-list-toolbar", children=[
+            html.Span("Select a start or end level to see how fast the car charged. Prices can be edited.",
+                      className="psacc-muted"),
+            export_button("export-battery-table"),
+        ]),
+        card(table, "psacc-table-card"),
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Charging speed")),
+            dbc.ModalBody(html.Div(id="tab_battery_popup_graph")),
+            dbc.ModalFooter(dbc.Button("Close", id="tab_battery_popup-close", className="ms-auto")),
+        ], id="tab_battery_popup", size="xl"),
+    ]
+
+
 def register_callbacks(dash_app):
     """Registered once when the app starts, like FigureFilter's (see set_clientside_callback)."""
     dash_app.clientside_callback(
@@ -137,4 +189,24 @@ def register_callbacks(dash_app):
          Output("odometer-card", "children"), Output("fuel-card", "children"), Output("fuel-card", "style")],
         [Input("clientside-data-store", "data"), Input("date-slider", "value")],
         State("clientside-config-store", "data"),
+    )
+    dash_app.clientside_callback(
+        "function(data, range) { return psaccTripsList(data, range) }",
+        [Output("trips-list", "children"), Output("trips-count", "children")],
+        [Input("clientside-data-store", "data"), Input("date-slider", "value")],
+    )
+    dash_app.clientside_callback(
+        "function(clicks, data, range) { return psaccExportTrips(clicks, data, range) }",
+        Output("trips-download", "data"),
+        Input("export-trips-csv", "n_clicks"),
+        [State("clientside-data-store", "data"), State("date-slider", "value")],
+        prevent_initial_call=True,
+    )
+    dash_app.clientside_callback(
+        "function(clicks, data) { return psaccTripDetails(clicks, data) }",
+        [Output("tab_trips_popup-title", "children"), Output("trip-route-graph", "figure"),
+         Output("trip-route-box", "style"), Output("trip-route-none", "style")],
+        Input({"type": "trip-details", "index": ALL}, "n_clicks"),
+        State("clientside-data-store", "data"),
+        prevent_initial_call=True,
     )
