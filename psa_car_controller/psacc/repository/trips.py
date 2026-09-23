@@ -126,6 +126,12 @@ class Trips(list):
                                 if diff_level_fuel != 0:
                                     trip.set_fuel_consumption(diff_level_fuel)
                                 trip.mileage = end["mileage"]
+                                trip.start_level, trip.end_level = start["level"], end["level"]
+                                if trip.start_level is not None:
+                                    trip.start_level_source = "status"
+                                if trip.end_level is not None:
+                                    trip.end_level_source = "status"
+                                trip.start_level_fuel, trip.end_level_fuel = start["level_fuel"], end["level_fuel"]
                                 logger.debugv("Trip: {0.start_at} -> {0.end_at} {0.distance:.1f}km {0.duration:.2f}h "
                                               "{0.speed_average:.0f}km/h {0.consumption:.2f}kWh "
                                               "{0.consumption_km:.2f}kWh/100km {0.consumption_fuel:.2f}L "

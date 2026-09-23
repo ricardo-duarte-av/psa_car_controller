@@ -273,7 +273,10 @@ class TestUnit(unittest.TestCase):
                                   'consumption_by_temp': None,
                                   'positions': {'lat': [latitude], 'long': [longitude]},
                                   'duration': 40.0, 'speed_average': 28.5, 'distance': 19.0, 'mileage': 30.0,
-                                  'altitude_diff': 2, 'id': 1, 'consumption': 4.6})
+                                  'altitude_diff': 2, 'id': 1, 'consumption': 4.6, 'consumption_fuel': 0,
+                                  'end_at': date2, 'source': 'psacc', 'start_level': 40, 'end_level': 30,
+                                  'start_level_source': 'status', 'end_level_source': 'status',
+                                  'start_level_fuel': None, 'end_level_fuel': None})
 
         Charging.elec_price = ConfigRepository.read_config(DATA_DIR + "config.ini").Electricity_config
         start_level = 40
@@ -344,7 +347,11 @@ class TestUnit(unittest.TestCase):
                                    'altitude_diff': 0,
                                    'id': 1,
                                    'consumption': 1.32,
-                                   'consumption_fuel_km': 4.53}])
+                                   'consumption_fuel_km': 4.53,
+                                   'consumption_fuel': 0.86, 'end_at': date2, 'source': 'psacc',
+                                   'start_level': 40, 'end_level': 30,
+                                   'start_level_source': 'status', 'end_level_source': 'status',
+                                   'start_level_fuel': 30, 'end_level_fuel': 28}])
 
     def test_trip_without_coordinates(self):
         """Rows recorded while the car's gps wasn't updated still build a trip, with no route."""
@@ -385,7 +392,11 @@ class TestUnit(unittest.TestCase):
                                    'altitude_diff': 0,
                                    'id': 1,
                                    'consumption': 1.32,
-                                   'consumption_fuel_km': 4.53}])
+                                   'consumption_fuel_km': 4.53,
+                                   'consumption_fuel': 0.86, 'end_at': end, 'source': 'psacc',
+                                   'start_level': 40, 'end_level': 30,
+                                   'start_level_source': 'status', 'end_level_source': 'status',
+                                   'start_level_fuel': 30, 'end_level_fuel': 28}])
 
     def test_elec_consumption_none_level(self):
         from psa_car_controller.psacc.application.trip_parser import TripParser

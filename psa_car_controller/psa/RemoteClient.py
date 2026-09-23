@@ -154,7 +154,7 @@ class RemoteClient:
         return result
 
     @staticmethod
-    def _parse_event_date(date):
+    def parse_event_date(date):
         if not date:
             return None
         try:
@@ -173,7 +173,7 @@ class RemoteClient:
         """
         if level is None:
             return None
-        event_date = self._parse_event_date(date)
+        event_date = self.parse_event_date(date)
         prev = self._last_battery.get(vin)
         if prev is not None:
             prev_level, prev_date = prev

@@ -145,8 +145,14 @@ class EventBroker:
 
     def __init__(self):
         self._subscribers = []
+        self._listeners = []
         self._lock = threading.Lock()
         self._last_events = OrderedDict()
+
+    def add_listener(self, listener):
+        """Call listener(event_type, data) on every published event, in the publishing thread."""
+        with self._lock:
+            self._listeners.append(listener)
 
     def subscribe(self) -> Queue:
         queue = Queue(maxsize=MAX_QUEUED_EVENTS)
@@ -166,6 +172,12 @@ class EventBroker:
         with self._lock:
             self._last_events[event_type] = event
             subscribers = list(self._subscribers)
+            listeners = list(self._listeners)
+        for listener in listeners:
+            try:
+                listener(event_type, data)
+            except Exception:  # pylint: disable=broad-except
+                logger.exception("event listener failed on %s", event_type)
         for queue in subscribers:
             try:
                 queue.put_nowait(event)

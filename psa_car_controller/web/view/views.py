@@ -12,12 +12,13 @@ import time
 from psa_car_controller.common import utils
 from psa_car_controller.common.mylogger import CustomLogger
 from psa_car_controller.psacc.application.car_controller import PSACarController
-from psa_car_controller.psacc.model.car import Cars, Car
+from psa_car_controller.psacc.model.car import Car
 from psa_car_controller.psacc.model.charge import Charge
 
 from psa_car_controller.psacc.repository.trips import Trips
 
 from psa_car_controller.psacc.application.charging import Charging
+from psa_car_controller.psacc.application.merged_trips import get_merged_trips
 from psa_car_controller.web import figures
 
 from psa_car_controller.web.app import dash_app
@@ -199,8 +200,7 @@ def update_trips():
             if APP.is_good and APP.myp.vehicles_list:
                 car = get_default_car()  # todo handle multiple car
                 try:
-                    trips_by_vin = Trips.get_trips(Cars([car]))
-                    trips = trips_by_vin[car.vin]
+                    trips = get_merged_trips(APP.myp, car)
                     if len(trips) > 0:
                         min_date = trips[0].start_at
                         max_date = trips[-1].start_at
