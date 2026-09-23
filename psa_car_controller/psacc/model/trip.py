@@ -46,6 +46,8 @@ class Trip:
         self.end_level_source = None
         self.start_level_fuel = None
         self.end_level_fuel = None
+        # still being driven: its end, distance and consumptions are the ones so far
+        self.in_progress = False
 
     def add_points(self, latitude, longitude):
         if latitude is None or longitude is None:  # recorded while the car's gps wasn't updated
@@ -98,6 +100,7 @@ class Trip:
                "start_level": self.start_level, "end_level": self.end_level,
                "start_level_source": self.start_level_source, "end_level_source": self.end_level_source,
                "start_level_fuel": self.start_level_fuel, "end_level_fuel": self.end_level_fuel,
+               "in_progress": self.in_progress,
                }
         if self.car.has_battery():
             res["consumption_km"] = self.consumption_km

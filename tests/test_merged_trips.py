@@ -144,6 +144,13 @@ class TestMergedTrips(unittest.TestCase):
         self.assertIs(earlier, trips[0])
         self.assertEqual([1, 2], [t.id for t in trips])
 
+    def test_the_trip_psa_is_still_recording_is_in_progress(self):
+        done, driving = psa_trip(at(0), 10, 6.2), psa_trip(at(60), 17, 5.5)
+        done["done"], driving["done"] = True, False
+        trips = MergedTrips.get(self.car, [], [done, driving, psa_trip(at(-60), 5, 1)])
+        self.assertEqual([False, False, True], [t.in_progress for t in trips])
+        self.assertTrue(trips[2].get_info()["in_progress"])
+
     def test_without_psa_trips_psacc_ones_are_kept(self):
         trip = psacc_trip(self.car, at(0), at(10))
         self.assertEqual([trip], list(MergedTrips.get(self.car, [trip], None)))

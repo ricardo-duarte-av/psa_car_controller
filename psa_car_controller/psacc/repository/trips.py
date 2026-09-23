@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Dict
 
 from geojson import FeatureCollection
@@ -13,6 +14,15 @@ from psa_car_controller.psacc.repository.db import Database
 logger = CustomLogger.getLogger(__name__)
 
 MAX_SPEED = 150
+# psacc records a position at each status update, frequent while driving: a trip that ends on the
+# last one recorded is still being driven unless the car has been silent for longer than this
+MAX_IN_PROGRESS_SILENCE = timedelta(minutes=15)
+
+
+def is_recent(date: datetime) -> bool:
+    if date.tzinfo is None:
+        date = date.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - date < MAX_IN_PROGRESS_SILENCE
 
 
 class Trips(list):
@@ -105,6 +115,7 @@ class Trips(list):
                             # think if add point is needed
                             end = next_point
                             end_trip = True
+                            trip.in_progress = is_recent(end["Timestamp"])
                             logger.debugv("last position found")
                         if end_trip:
                             logger.debugv("stop trip at {0[Timestamp]} mileage:{0[mileage]:.1f} level:{0[level]}"

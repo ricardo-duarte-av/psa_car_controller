@@ -143,6 +143,8 @@ class MergedTrips:
             duration_s = (stopped_at - trip.start_at).total_seconds()
         trip.duration = (duration_s or 0) / 3600
         trip.end_at = stopped_at or trip.start_at + timedelta(seconds=duration_s or 0)
+        # psa lists the trip being driven with done false and its last update as the stop
+        trip.in_progress = psa_trip.get("done", None) is False
         trip.distance = psa_trip.get("distance", None) or 0
         start_mileage = psa_trip.get("startMileage", None)
         trip.mileage = start_mileage + trip.distance if start_mileage is not None else None
