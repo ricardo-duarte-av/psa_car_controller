@@ -44,15 +44,18 @@ class Readings:
     def __init__(self, car_readings: List[Reading], status_readings: List[Reading]):
         self._by_source = [(r, [x.date for x in r]) for r in (car_readings, status_readings) if r]
 
-    def last_before(self, date: datetime, not_before: Optional[datetime]) -> Optional[Reading]:
-        for readings, dates in self._by_source:
+    def _sources(self, car_only):
+        return [(r, d) for r, d in self._by_source if not car_only or r[0].source == "car"]
+
+    def last_before(self, date: datetime, not_before: Optional[datetime], car_only=False) -> Optional[Reading]:
+        for readings, dates in self._sources(car_only):
             i = bisect_right(dates, date + BOUNDARY_TOLERANCE) - 1
             if i >= 0 and (not_before is None or readings[i].date > not_before - BOUNDARY_TOLERANCE):
                 return readings[i]
         return None
 
-    def first_after(self, date: datetime, not_after: datetime) -> Optional[Reading]:
-        for readings, dates in self._by_source:
+    def first_after(self, date: datetime, not_after: datetime, car_only=False) -> Optional[Reading]:
+        for readings, dates in self._sources(car_only):
             i = bisect_left(dates, date - BOUNDARY_TOLERANCE)
             if i < len(readings) and readings[i].date <= not_after:
                 return readings[i]
@@ -75,14 +78,18 @@ def psa_energy(energies, energy_type):
     return None
 
 
+def psa_level_made_up(energies) -> bool:
+    """True when psa gives a level with no range, which it does when the battery is flat."""
+    electric = psa_energy(energies, "Electric")
+    return electric is not None and (electric.get("level", None) or 0) > MAX_LEVEL_WITHOUT_RANGE \
+        and electric.get("autonomy", None) == 0
+
+
 def psa_electric_level(energies):
     electric = psa_energy(energies, "Electric")
-    if electric is None or electric.get("level", None) is None:
+    if electric is None or electric.get("level", None) is None or psa_level_made_up(energies):
         return None
-    level = electric["level"]
-    if level > MAX_LEVEL_WITHOUT_RANGE and electric.get("autonomy", None) == 0:
-        return None
-    return level
+    return electric["level"]
 
 
 def overlaps(trip: Trip, start: datetime, end: datetime) -> bool:
@@ -170,11 +177,15 @@ class MergedTrips:
         trip.consumption, trip.consumption_km = None, None
         if not trip.car.has_battery():
             return
-        start = readings.last_before(trip.start_at, previous_stop)
+        # The status api reads the same made-up level as psa's trip: when psa's is, only the car's
+        # own reading can be trusted (status rows recorded before that level was filtered say 100%).
+        start = readings.last_before(trip.start_at, previous_stop,
+                                     car_only=psa_level_made_up(psa_trip.get("startEnergies", None)))
         end_limit = trip.end_at + MAX_END_READING_DELAY
         if next_start is not None:
             end_limit = min(end_limit, next_start)
-        end = readings.first_after(trip.end_at, end_limit)
+        end = readings.first_after(trip.end_at, end_limit,
+                                   car_only=psa_level_made_up(psa_trip.get("endEnergies", None)))
         if start is not None:
             trip.start_level, trip.start_level_source = start.level, start.source
         else:
