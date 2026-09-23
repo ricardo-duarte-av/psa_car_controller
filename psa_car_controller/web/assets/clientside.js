@@ -193,9 +193,15 @@ function updateCardsValue (data) {
     res.elec_consum_price = avgPriceKw * res.elec_consum_kw
     res.avg_consum_price = avgPriceKw * res.avg_consum_kw
   }
-  for (const [key, value] of Object.entries(res)) {
-    document.getElementById(key).innerHTML = nbFormat(value)
-  }
+  // a total missing from this period mustn't keep the last one's value
+  const cardIds = ['avg_consum_kw', 'avg_consum_price', 'avg_emission_km', 'avg_emission_kw', 'avg_chg_speed',
+    'elec_consum_kw', 'elec_consum_price']
+  cardIds.forEach(key => {
+    const element = document.getElementById(key)
+    if (element) element.innerHTML = key in res && Number.isFinite(res[key]) ? nbFormat(res[key]) : '–'
+  })
+  const co2 = document.getElementById('tile-co2')
+  if (co2) co2.classList.toggle('psacc-tile-empty', !(res.avg_emission_kw > 0))
 }
 
 function sortDataset (ctx, data, tables) {

@@ -23,7 +23,9 @@ from psa_car_controller.web import figures
 
 from psa_car_controller.web.app import dash_app
 from psa_car_controller.psacc.repository.db import Database
-from psa_car_controller.web.tools.utils import diff_dashtable, unix_time_millis, get_marks_from_start_end, create_card
+from psa_car_controller.web.tools.utils import diff_dashtable, unix_time_millis, get_marks_from_start_end
+from psa_car_controller.web.view import dashboard
+from psa_car_controller.web.view.dashboard import icon
 from psa_car_controller.web.view.config_oauth import get_oauth_config_layout
 from psa_car_controller.web.view.config_views import log_layout, config_layout
 
@@ -55,12 +57,6 @@ def get_default_car() -> Car:
 # the dashboard's sections: (url hash, label, icon)
 TABS = [("summary", "Summary", "gauge"), ("trips", "Trips", "route"), ("charging", "Charging", "bolt"),
         ("map", "Map", "pin"), ("control", "Control", "lock")]
-
-
-def icon(name, small=False):
-    """An icon from assets/icons, painted in the text colour."""
-    return html.Span(className=f"psacc-icon psacc-icon-{name}" + (" psacc-icon-sm" if small else ""),
-                     **{"aria-hidden": "true"})
 
 
 def theme_switch():
@@ -313,26 +309,22 @@ def serve_layout():
             figures.CURRENCY = APP.config.General.currency
             figures.EXPORT_FORMAT = APP.config.General.export_format
             fig_filter, graphs, maps = new_fig_filter()
-            summary_tab = [
-                dbc.Container(dbc.Row(id="summary-cards",
-                                      children=create_card(figures.get_summary_cards())), fluid=True),
-                *graphs]
+            summary_tab = dashboard.summary_panel(graphs)
             fig_filter.src = {"trips": trips.get_trips_as_dict(), "chargings": chargings}
         except (IndexError, TypeError, NameError, AssertionError, NameError, AttributeError):
+            fig_filter = None
             summary_tab = figures.ERROR_DIV
             maps = figures.ERROR_DIV
             logger.warning("Failed to generate figure, there is probably not enough data yet", exc_info_debug=True)
             range_slider = html.Div()
             figures.battery_table = figures.ERROR_DIV
 
-        stores = fig_filter.get_store({"minimumLength": APP.config.General.minimum_trip_length}) if fig_filter else []
+        stores = fig_filter.get_store({"minimumLength": APP.config.General.minimum_trip_length,
+                                       "currency": figures.CURRENCY}) if fig_filter else []
         data_div = html.Div([
             *stores,
             html.Main(className="psacc-main", children=[
-                dbc.Row(
-                    children=range_slider,
-                    style={"paddingLeft": "40px", "paddingRight": "40px", "height": "50px"},
-                ),
+                dashboard.period_picker(range_slider) if fig_filter else html.Div(),
                 html.Div([
                     html.Div(id="panel-summary", className="psacc-panel", children=summary_tab),
                     html.Div(id="panel-trips", className="psacc-panel",
@@ -422,6 +414,7 @@ def serve_layout():
 
 # registered before any page is served: see FigureFilter.set_clientside_callback
 new_fig_filter()[0].set_clientside_callback(dash_app)
+dashboard.register_callbacks(dash_app)
 create_callback()
 
 try:

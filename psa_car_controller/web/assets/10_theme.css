@@ -320,3 +320,146 @@ html[data-tab=control] #panel-control {
   body { padding-bottom: 68px; }
   .psacc-main { padding: 16px; }
 }
+
+/* cards */
+.psacc-card {
+  padding: 20px 24px;
+  border: 1px solid var(--psacc-border);
+  border-radius: 16px;
+  background: var(--psacc-surface);
+}
+
+.psacc-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.psacc-card-title { margin: 0; font-size: 17px; font-weight: 600; }
+.psacc-card-sub { font-size: 14px; color: var(--psacc-muted); }
+.psacc-card-label { font-size: 14px; color: var(--psacc-muted); }
+.psacc-card-value { margin: 4px 0; font-size: 18px; font-weight: 600; }
+.psacc-card-link { display: inline-block; margin-top: 16px; font-size: 14px; font-weight: 500; text-decoration: none; }
+.psacc-strong { color: var(--psacc-text); }
+
+.psacc-legend { display: flex; gap: 18px; font-size: 13px; color: var(--psacc-muted); }
+.psacc-legend > span { display: flex; align-items: center; gap: 6px; }
+.psacc-swatch { display: inline-block; width: 14px; border-radius: 2px; }
+.psacc-swatch-line { height: 3px; background: var(--psacc-accent); }
+.psacc-swatch-drive { height: 6px; background: var(--psacc-drive); }
+.psacc-swatch-charge { height: 10px; background: rgba(var(--psacc-accent-rgb), 0.18); }
+
+/* totals */
+.psacc-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.psacc-tile { display: flex; flex-direction: column; gap: 10px; }
+.psacc-tile-head { display: flex; align-items: center; justify-content: space-between; font-size: 14px; color: var(--psacc-muted); }
+.psacc-tile-head .psacc-icon { color: var(--psacc-accent); }
+.psacc-tile-main { display: flex; align-items: baseline; gap: 8px; font-size: 15px; color: var(--psacc-muted); }
+.psacc-tile-value { font-size: 42px; font-weight: 600; line-height: 44px; color: var(--psacc-text); }
+.psacc-tile-sub { font-size: 14px; color: var(--psacc-muted); }
+.psacc-tile-empty-text { display: none; }
+.psacc-tile-empty-value { font-size: 24px; font-weight: 600; line-height: 44px; }
+.psacc-tile-empty .psacc-tile-main,
+.psacc-tile-empty > .psacc-tile-sub { display: none; }
+.psacc-tile-empty .psacc-tile-empty-text { display: flex; flex-direction: column; gap: 10px; }
+.psacc-tile-empty .psacc-tile-head .psacc-icon { color: var(--psacc-muted); }
+
+/* layout of the summary */
+.psacc-grid-2-1 {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.psacc-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.psacc-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.psacc-chart-wide { grid-column: 1 / -1; }
+.psacc-chart-card { padding: 12px 12px 4px; }
+
+/* the day's trips */
+.psacc-day-card { display: flex; flex-direction: column; }
+.psacc-day-trips { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.psacc-day-trip { display: flex; align-items: center; gap: 12px; }
+.psacc-day-trip-time { width: 44px; font-size: 14px; color: var(--psacc-muted); }
+.psacc-day-trip-km { min-width: 64px; text-align: right; font-size: 15px; }
+.psacc-bar { flex-grow: 1; height: 10px; border-radius: 5px; background: var(--psacc-surface-2); }
+.psacc-bar-fill { height: 10px; border-radius: 5px; background: var(--psacc-accent); }
+
+.psacc-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--psacc-border-strong);
+  color: var(--psacc-text);
+  font-family: Barlow, sans-serif;
+  font-size: 12px;
+}
+
+/* the period */
+.psacc-period { margin-bottom: 24px; }
+.psacc-toolbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+
+.psacc-segmented {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--psacc-border);
+  border-radius: 12px;
+  background: var(--psacc-surface);
+}
+
+.psacc-seg {
+  height: 36px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--psacc-muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.psacc-seg:hover { color: var(--psacc-text); }
+.psacc-seg.active { background: var(--psacc-border-strong); color: var(--psacc-text); }
+
+.psacc-period-label { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--psacc-muted); }
+.psacc-custom-range { padding: 20px 8px 8px; }
+
+#date-slider .dash-slider-mark { color: var(--psacc-muted); }
+#date-slider .dash-slider-track { background: var(--psacc-surface-2); }
+#date-slider .dash-slider-range { background: var(--psacc-accent); }
+#date-slider .dash-slider-thumb { border-color: var(--psacc-accent); background: var(--psacc-surface); }
+
+@media (max-width: 991.98px) {
+  .psacc-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .psacc-grid-2-1, .psacc-grid-3, .psacc-charts { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 767.98px) {
+  .psacc-tiles { gap: 12px; }
+  .psacc-tile-value { font-size: 30px; line-height: 34px; }
+  .psacc-card { padding: 14px 16px; }
+  .psacc-segmented { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); width: 100%; }
+  .psacc-seg { padding: 0 4px; }
+}

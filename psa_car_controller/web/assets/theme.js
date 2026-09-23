@@ -57,9 +57,30 @@
     return update
   }
 
+  /* the colour a trace takes in the theme: bars and lines in the accent, scattered points in the
+     driving colour; null leaves it (the map's position marker) */
+  function traceColor (trace) {
+    const mode = trace.mode || ''
+    if (trace.type === 'histogram' || trace.type === 'bar') return cssVar('--psacc-accent')
+    if (trace.type === 'scattermap') return mode.includes('lines') ? cssVar('--psacc-accent') : null
+    if (!trace.type || trace.type === 'scatter' || trace.type === 'scattergl') {
+      return mode.includes('lines') ? cssVar('--psacc-accent') : cssVar('--psacc-drive')
+    }
+    return null
+  }
+
+  function colorTrace (trace, color) {
+    trace.marker = Object.assign({}, trace.marker, { color })
+    if ((trace.mode || '').includes('lines')) trace.line = Object.assign({}, trace.line, { color })
+  }
+
   /* a figure object (from a callback) made to follow the theme */
   function themeFigure (figure) {
     if (!figure || !figure.layout) return figure
+    ;(figure.data || []).forEach(trace => {
+      const color = traceColor(trace)
+      if (color) colorTrace(trace, color)
+    })
     const update = layoutUpdate(figure.layout)
     for (const [path, value] of Object.entries(update)) {
       const keys = path.split('.')
@@ -77,7 +98,11 @@
     const layout = plot.layout || {}
     const fontOk = layout.font && layout.font.color === cssVar('--psacc-muted')
     const mapOk = !layout.map || layout.map.style === mapStyle()
-    return fontOk && mapOk
+    const tracesOk = (plot.data || []).every(trace => {
+      const color = traceColor(trace)
+      return !color || (trace.marker && trace.marker.color === color)
+    })
+    return fontOk && mapOk && tracesOk
   }
 
   /* restyles the figures drawn with another theme, or with none (server-side figures) */
@@ -85,6 +110,13 @@
     if (!window.Plotly) return
     document.querySelectorAll('.js-plotly-plot').forEach(plot => {
       if (plot.layout && !themed(plot)) {
+        (plot.data || []).forEach((trace, index) => {
+          const color = traceColor(trace)
+          if (!color) return
+          const update = { 'marker.color': color }
+          if ((trace.mode || '').includes('lines')) update['line.color'] = color
+          window.Plotly.restyle(plot, update, [index])
+        })
         window.Plotly.relayout(plot, layoutUpdate(plot.layout))
       }
     })
@@ -94,6 +126,10 @@
     const value = choice()
     document.querySelectorAll('.psacc-theme button[data-choice]').forEach(button => {
       button.setAttribute('aria-checked', String(button.dataset.choice === value))
+    })
+    // toggle buttons whose state a callback sets as a class (the summary's period)
+    document.querySelectorAll('.psacc-seg').forEach(button => {
+      button.setAttribute('aria-pressed', String(button.classList.contains('active')))
     })
   }
 
