@@ -117,6 +117,20 @@ class TestUnit(unittest.TestCase):
         res = Database.get_battery_curve(Database.get_db(), date0, date4, vin)
         self.assertEqual(4, len(res))
 
+    def test_charge_with_stale_start_level(self):
+        # the api reported 100 at the start of a charge from 5 to 100, it must not be dropped as a little charge
+        car = self.vehicule_list[0]
+        get_new_test_db()
+        for date, level, status in ((date0, 100, "InProgress"), (date1, 5, "InProgress"), (date2, 60, "InProgress"),
+                                    (date3, 100, "InProgress"), (date4, 100, "Stopped")):
+            Charging.record_charging(car, status, date, level, latitude, longitude, "FR", "slow", 20, 60,
+                                     123456789.1)
+        charge = Database.get_last_charge(car.vin)
+        self.assertEqual(charge.start_at, date0)
+        self.assertEqual(charge.stop_at, date4)
+        self.assertEqual(charge.start_level, 5)
+        self.assertEqual(charge.end_level, 100)
+
     def test_set_charge_price(self):
         vin = self.vehicule_list[0].vin
         get_new_test_db()

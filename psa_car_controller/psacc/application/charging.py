@@ -79,6 +79,12 @@ class Charging:
                 start_at = charge_date
             else:
                 start_at = last_charge.start_at
+                # the api can give a stale level at the charge start (100 on a nearly empty battery), and
+                # a charge only raises the level: a lower reading is the real start. Left as is, the stale
+                # start_level makes the whole charge look like a little one, which clean_battery deletes.
+                if level is not None and last_charge.start_level is not None and level < last_charge.start_level:
+                    conn.execute("UPDATE battery SET start_level=? WHERE start_at=? AND VIN=?",
+                                 (level, start_at, car.vin))
             try:
                 conn.execute(
                     "INSERT INTO battery_curve(start_at,VIN,date,level,rate,autonomy) VALUES(?,?,?,?,?,?)",
