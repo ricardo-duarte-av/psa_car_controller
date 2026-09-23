@@ -159,6 +159,13 @@ class TestHomeAssistantIngressIntegration(TestCase):
         }
         self.validate_path(headers, r"/(assets|_dash|_favicon).+")
 
+    def test_version(self):
+        """The app compares its version with this, they release in step."""
+        response = requests.get(f"{self.server_url}/version", timeout=5)
+        self.assertEqual(200, response.status_code)
+        from psa_car_controller import __version__
+        self.assertEqual({"version": __version__}, response.json())
+
     def test_api_route_with_ingress_path(self):
         """
         Test that Flask API routes (from api.py) work with prefix header.

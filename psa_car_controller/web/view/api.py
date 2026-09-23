@@ -3,6 +3,7 @@ import logging
 from flask import jsonify, request, Response as FlaskResponse
 from pydantic import BaseModel
 
+from psa_car_controller import __version__
 from psa_car_controller.common.utils import RateLimitException
 from psa_car_controller.psa.remote_events import CommandResult
 from psa_car_controller.psacc.application.car_controller import PSACarController
@@ -270,6 +271,12 @@ def get_command_result(correlation_id):
     if result is None:
         return jsonify({"error": "unknown correlation id"}), 404
     return command_response(result)
+
+
+@app.route('/version')
+def get_version():
+    """This server's release. The app releases in step with it: the same version is made for this one."""
+    return jsonify({"version": __version__})
 
 
 @app.route('/commands')
