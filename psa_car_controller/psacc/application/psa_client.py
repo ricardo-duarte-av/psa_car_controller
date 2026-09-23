@@ -537,7 +537,11 @@ class PSAClient:
                                      level_fuel, moving, temp)
             self._last_position_date[car.vin] = position_date
         else:
-            logger.debug("position of %s wasn't updated since %s, not recorded", car.vin, position_date)
+            # Still record the mileage and levels, which trips are built from, but not the stale
+            # coordinates: a car whose gps stopped reporting would otherwise get no trips at all.
+            logger.debug("position of %s wasn't updated since %s, recorded without it", car.vin, position_date)
+            Database.record_position(self.weather_api, car.vin, mileage, None, None, None, charge_date, level,
+                                     level_fuel, moving, temp)
         self.abrp.call(car, Database.get_last_temp(car.vin))
         if car.has_battery():
             electric_energy_status = car.status.get_energy('Electric')
