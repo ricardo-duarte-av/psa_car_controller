@@ -1,5 +1,5 @@
 from datetime import datetime
-from threading import Lock
+from threading import Event, Lock
 from typing import List
 from urllib.parse import parse_qs, urlparse
 
@@ -38,6 +38,9 @@ logger = CustomLogger.getLogger(__name__)
 
 EMPTY_DIV = "empty-div"
 CALLBACK_CREATED = False
+RELEASES_URL = "https://github.com/ricardo-duarte-av/psa_car_controller/releases/tag/"
+# how long a page waits for the trips to be read before showing a message instead
+MAX_DATA_WAIT = 30  # seconds
 
 trips: Trips = Trips()
 chargings: List[dict]
@@ -51,7 +54,7 @@ def get_default_car() -> Car:
 
 def add_header(el):
     version = "v" + __version__
-    github_url = "https://github.com/flobz/psa_car_controller/releases/tag/" + version
+    github_url = RELEASES_URL + version
     dbc_version = dbc.Button(html.I(version, className="m-1"),
                              size='sm',
                              color="secondary",
@@ -181,11 +184,30 @@ def create_callback():  # noqa: MC0001
 
 
 no_concurrent_update_trip = Lock()
-DATA_READY = False
+# set once the trips have been read, whether there are any or not
+DATA_READY = Event()
+
+
+def new_fig_filter():
+    """The graphs, map and tables the date slider filters, with the figures built last."""
+    fig_filter = FigureFilter()
+    graphs = [
+        fig_filter.add_graph(dcc.Graph(id="consumption_fig"), "start_at", ["consumption_km"],
+                             figures.consumption_fig),
+        fig_filter.add_graph(dcc.Graph(id="consumption_fig_by_speed"), "speed_average",
+                             ["consumption_km"] * 2, figures.consumption_fig_by_speed),
+        fig_filter.add_graph(dcc.Graph(id="consumption_graph_by_temp"), "consumption_by_temp",
+                             ["consumption_km"] * 2, figures.consumption_fig_by_temp)]
+    trips_map = fig_filter.add_map(dcc.Graph(id="trips_map", style={"height": '90vh'}), "lat",
+                                   ["long", "start_at_str"], figures.trips_map)
+    fig_filter.add_table(figures.TRIPS_TABLE_ID, "trips", figures.TRIPS_DATE_COLUMNS, figures.table_fig)
+    fig_filter.add_table(figures.CHARGINGS_TABLE_ID, "chargings", figures.CHARGINGS_DATE_COLUMNS,
+                         figures.battery_table)
+    return fig_filter, graphs, trips_map
 
 
 def update_trips():
-    global trips, chargings, cached_layout, min_date, max_date, min_millis, max_millis, step, marks, DATA_READY
+    global trips, chargings, cached_layout, min_date, max_date, min_millis, max_millis, step, marks
     # we allow on thread waiting for no_concurrent_update_trip lock
     with utils.nonblocking(no_concurrent_update_trip) as locked:
         if not locked:
@@ -233,7 +255,7 @@ def update_trips():
                 except AttributeError:
                     logger.debug("position table is probably empty :", exc_info=True)
         finally:
-            DATA_READY = True
+            DATA_READY.set()
         logger.debug("trips updated !")
         return
 
@@ -241,11 +263,13 @@ def update_trips():
 def serve_layout():
     global cached_layout
     if cached_layout is None:
-        while not DATA_READY:
-            logger.debug("wait for trips data...")
-            time.sleep(3)
+        if not DATA_READY.is_set():
+            # never read when the app was set up after it started; returns at once if being read
+            update_trips()
+            if not DATA_READY.wait(MAX_DATA_WAIT):
+                return dbc.Alert("Still reading the trips, reload the page in a moment.", color="info")
         logger.debug("Create new layout")
-        fig_filter = FigureFilter()
+        fig_filter = None
         try:
             range_slider = dcc.RangeSlider(
                 id='date-slider',
@@ -258,22 +282,12 @@ def serve_layout():
             )
             figures.CURRENCY = APP.config.General.currency
             figures.EXPORT_FORMAT = APP.config.General.export_format
+            fig_filter, graphs, maps = new_fig_filter()
             summary_tab = [
                 dbc.Container(dbc.Row(id="summary-cards",
                                       children=create_card(figures.get_summary_cards())), fluid=True),
-                fig_filter.add_graph(dcc.Graph(id="consumption_fig"), "start_at", ["consumption_km"],
-                                     figures.consumption_fig),
-                fig_filter.add_graph(dcc.Graph(id="consumption_fig_by_speed"), "speed_average",
-                                     ["consumption_km"] * 2, figures.consumption_fig_by_speed),
-                fig_filter.add_graph(dcc.Graph(id="consumption_graph_by_temp"), "consumption_by_temp",
-                                     ["consumption_km"] * 2, figures.consumption_fig_by_temp)]
-            maps = fig_filter.add_map(dcc.Graph(id="trips_map", style={"height": '90vh'}), "lat",
-                                      ["long", "start_at_str"], figures.trips_map)
-            fig_filter.add_table("trips", figures.table_fig)
-            fig_filter.add_table("chargings", figures.battery_table)
+                *graphs]
             fig_filter.src = {"trips": trips.get_trips_as_dict(), "chargings": chargings}
-            fig_filter.set_clientside_callback(dash_app, {"minimumLength": APP.config.General.minimum_trip_length})
-            create_callback()
         except (IndexError, TypeError, NameError, AssertionError, NameError, AttributeError):
             summary_tab = figures.ERROR_DIV
             maps = figures.ERROR_DIV
@@ -281,8 +295,9 @@ def serve_layout():
             range_slider = html.Div()
             figures.battery_table = figures.ERROR_DIV
 
+        stores = fig_filter.get_store({"minimumLength": APP.config.General.minimum_trip_length}) if fig_filter else []
         data_div = html.Div([
-            *fig_filter.get_store(),
+            *stores,
             html.Div([
                 dbc.Row(
                     children=range_slider,
@@ -377,6 +392,10 @@ def serve_layout():
         cached_layout = data_div
     return cached_layout
 
+
+# registered before any page is served: see FigureFilter.set_clientside_callback
+new_fig_filter()[0].set_clientside_callback(dash_app)
+create_callback()
 
 try:
     if APP.is_good:

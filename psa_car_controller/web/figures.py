@@ -17,6 +17,12 @@ from psa_car_controller.web.app import dash_app
 # pylint: disable=invalid-name
 from psa_car_controller.web.tools.utils import card_value_div, dash_date_to_datetime
 
+TRIPS_TABLE_ID = "trips-table"
+CHARGINGS_TABLE_ID = "battery-table"
+# the datetime columns of each table, shown as <column>_str
+TRIPS_DATE_COLUMNS = ["start_at"]
+CHARGINGS_DATE_COLUMNS = ["start_at", "stop_at"]
+
 ERROR_DIV = dbc.Alert("No data to show, there is probably no trips recorded yet", color="danger")
 PADDING_TOP = {"padding-top": "1em"}
 consumption_fig = ERROR_DIV
@@ -83,7 +89,7 @@ def get_figures(car: Car):
         for column_id in ('start_level', 'end_level'):
             style_cell_conditional.append({'if': {'column_id': column_id, }, 'display': 'None', })
     table_fig = DataTable(
-        id='trips-table',
+        id=TRIPS_TABLE_ID,
         export_format=EXPORT_FORMAT,
         sort_action='custom',
         sort_by=[{'column_id': 'id', 'direction': 'desc'}],
@@ -146,7 +152,7 @@ def get_figures(car: Car):
     consumption_fig_by_speed.update_layout(xaxis_title="average Speed km/h", yaxis_title="Consumption kWh/100Km")
     # battery_table
     battery_table = DataTable(
-        id='battery-table',
+        id=CHARGINGS_TABLE_ID,
         export_format=EXPORT_FORMAT,
         sort_action='custom',
         style_data={

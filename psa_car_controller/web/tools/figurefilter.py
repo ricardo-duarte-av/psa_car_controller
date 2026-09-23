@@ -3,8 +3,7 @@ import logging
 from logging import DEBUG
 
 from dash import dcc
-from dash._utils import create_callback_id
-from dash.dependencies import Output, Input
+from dash.dependencies import Output, Input, State
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +17,12 @@ class Graph:
 
 
 class Table:
-    def __init__(self, table_id, src, figure):
+    def __init__(self, table_id, src, date_columns, figure):
         self.table_id = table_id
         self.src = src
         self.figure = figure
-        self.date_columns = []
+        # the columns shown as <column>_str, formatted in the browser's locale
+        self.date_columns = date_columns
 
 
 def figures_to_dict(figures):
@@ -52,14 +52,8 @@ class FigureFilter:
         self.graphs.append(Graph(dash_Graph.id, x, y, figure))
         return dash_Graph
 
-    def add_table(self, src, figure):
-        try:
-            table = Table(figure.id, src, figure)
-            table.date_columns = [col["id"][:-4] for col in figure.columns if col["type"] == "datetime" and
-                                  col["id"].endswith("_str")]
-            self.tables.append(table)
-        except AttributeError:
-            logger.debug("figure isn't a table")
+    def add_table(self, table_id, src, date_columns, figure):
+        self.tables.append(Table(table_id, src, date_columns, figure))
 
     def __get_table_date_column_id(self):
         res = {table.src: table.date_columns for table in self.tables}
@@ -112,29 +106,27 @@ class FigureFilter:
         }, indent=4)
         return params
 
-    def set_clientside_callback(self, dash_app, config: dict):
-        output = self.__get_output()
+    def set_clientside_callback(self, dash_app):
+        """Registers the callback filling the graphs, map and tables from the stores.
+
+        It only depends on the ids and labels, so it's registered once when the app starts: the
+        browser reads the callbacks before asking for the page, a callback registered while building
+        the page would be missing on the first load.
+        """
         inputs = [Input('clientside-data-store', 'data'),
                   Input('date-slider', 'value'),
                   Input('clientside-figure-store', 'data'),
                   *self.__get_table_input_sort_by()]
-        callback_id = create_callback_id(self.__get_output(), inputs)
-        if callback_id not in dash_app.callback_map:
-            config_str = json.dumps(config)
-            if logger.isEnabledFor(DEBUG):
-                log_level = 10
-            else:
-                log_level = 20
-            fct_def = f"""function(data,range, figures, {self.gen_sort_variable()}) {{
-                            const params={self.get_params()}
-                            const logLevel={log_level}
-                            return filterAndSort(data, range, figures, params, logLevel,
-                             {self.__gen_sort_dict()}, {config_str})
-                          }}"""
-            dash_app.clientside_callback(fct_def, *output, *inputs)
-            return True
-        return False
+        log_level = 10 if logger.isEnabledFor(DEBUG) else 20
+        fct_def = f"""function(data,range, figures, {self.gen_sort_variable()}, config) {{
+                        const params={self.get_params()}
+                        const logLevel={log_level}
+                        return filterAndSort(data, range, figures, params, logLevel,
+                         {self.__gen_sort_dict()}, config)
+                      }}"""
+        dash_app.clientside_callback(fct_def, *self.__get_output(), *inputs, State('clientside-config-store', 'data'))
 
-    def get_store(self):
+    def get_store(self, config: dict):
         return [dcc.Store(id='clientside-figure-store', data=self.__get_figures()),
-                dcc.Store(id='clientside-data-store', data=self.src)]
+                dcc.Store(id='clientside-data-store', data=self.src),
+                dcc.Store(id='clientside-config-store', data=config)]
