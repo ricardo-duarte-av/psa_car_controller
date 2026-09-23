@@ -35,6 +35,17 @@ class Trip:
         self.altitude_diff = None
         self.temperatures = []
         self.id = None
+        # "psa" for a trip psa recorded (enriched with what psacc recorded meanwhile), "psacc" for one
+        # psacc rebuilt from its polled positions only
+        self.source = "psacc"
+        # battery % at both ends, and where each was read: "car" (its own reading), "status" (the
+        # status api, recorded by psacc) or "psa" (psa's trip)
+        self.start_level = None
+        self.end_level = None
+        self.start_level_source = None
+        self.end_level_source = None
+        self.start_level_fuel = None
+        self.end_level_fuel = None
 
     def add_points(self, latitude, longitude):
         if latitude is None or longitude is None:  # recorded while the car's gps wasn't updated
@@ -82,7 +93,11 @@ class Trip:
                "consumption_by_temp": self.get_temperature(), "positions": self.get_positions(),
                "duration": self.duration * 60, "speed_average": self.speed_average, "distance": self.distance,
                "mileage": self.mileage, "altitude_diff": self.altitude_diff, "id": self.id,
-               "consumption": self.consumption
+               "consumption": self.consumption, "consumption_fuel": self.consumption_fuel,
+               "end_at": self.end_at, "source": self.source,
+               "start_level": self.start_level, "end_level": self.end_level,
+               "start_level_source": self.start_level_source, "end_level_source": self.end_level_source,
+               "start_level_fuel": self.start_level_fuel, "end_level_fuel": self.end_level_fuel,
                }
         if self.car.has_battery():
             res["consumption_km"] = self.consumption_km

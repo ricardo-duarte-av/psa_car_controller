@@ -122,6 +122,9 @@ class Database:
                         level INTEGER, UNIQUE(start_at, VIN, level));""")
         conn.execute("""CREATE TABLE IF NOT EXISTS
                         battery_soh(date DATETIME, VIN TEXT, level FLOAT, UNIQUE(VIN, level));""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS
+                        battery_reading(date DATETIME, VIN TEXT, level INTEGER, autonomy INTEGER,
+                        UNIQUE(VIN, date));""")
         table_to_update = [["position", NEW_POSITION_COLUMNS],
                            ["battery", NEW_BATTERY_COLUMNS],
                            ["battery_curve", NEW_BATTERY_CURVE_COLUMNS]]
@@ -226,6 +229,31 @@ class Database:
             logger.debug("Delete duplicate line")
             conn.execute("DELETE FROM position where Timestamp=?;", (res[1]["Timestamp"],))
             conn.commit()
+
+    @staticmethod
+    def record_battery_reading(vin, date: datetime, level, autonomy):
+        """The car's own battery reading (soc_batt of its mqtt events).
+
+        The status api level has been seen stuck at 100% on an empty battery, the car's reading
+        hasn't, so trips take their battery levels from here first.
+        """
+        conn = Database.get_db()
+        conn.execute("INSERT OR IGNORE INTO battery_reading(date, VIN, level, autonomy) VALUES(?,?,?,?)",
+                     (date, vin, level, autonomy))
+        conn.commit()
+
+    @staticmethod
+    def get_battery_readings(vin, start: datetime, end: datetime):
+        conn = Database.get_db()
+        return conn.execute("SELECT date, level FROM battery_reading WHERE VIN=? AND date>=? AND date<=? "
+                            "AND level IS NOT NULL ORDER BY date", (vin, start, end)).fetchall()
+
+    @staticmethod
+    def get_positions(vin, start: datetime, end: datetime):
+        conn = Database.get_db()
+        return conn.execute("SELECT Timestamp, longitude, latitude, altitude, mileage, level, temperature "
+                            "FROM position WHERE VIN=? AND Timestamp>=? AND Timestamp<=? ORDER BY Timestamp",
+                            (vin, start, end)).fetchall()
 
     @staticmethod
     def get_last_temp(vin):

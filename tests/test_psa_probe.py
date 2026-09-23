@@ -1,5 +1,8 @@
 import unittest
-from unittest.mock import MagicMock
+from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
+
+from psa_car_controller.psa.remote_events import EventBroker
 
 from psa_car_controller.psacc.application.psa_client import PSAClient
 from psa_car_controller.psacc.model.car import Cars, Car
@@ -22,6 +25,7 @@ def get_client():
     client.api_config.host = "https://api.example.invalid/connectedcar/v4"
     client.client_id = "client"
     client.realm = "realm"
+    client._psa_trips_cache = {}  # pylint: disable=protected-access
     return client
 
 
@@ -130,6 +134,49 @@ class TestApiHelpers(unittest.TestCase):
         res.json.return_value = {"total": 2, "_embedded": {"trips": [{"id": "a"}, {"id": "b"}]}}
         client.manager.get.return_value = res
         self.assertEqual([{"id": "a"}, {"id": "b"}], client.get_psa_trips("myvin"))
+
+    def test_psa_trips_follow_the_next_page_and_are_cached(self):
+        client = get_client()
+        first, second = response(200), response(200)
+        first.json.return_value = {"_embedded": {"trips": [{"id": "a"}]}, "_links": {"next": {
+            "href": "https://api.example.invalid/connectedcar/v4/user/vehicles/myid/trips?pageToken=tok2"}}}
+        second.json.return_value = {"_embedded": {"trips": [{"id": "b"}]}, "_links": {}}
+        client.manager.get.side_effect = [first, second]
+        self.assertEqual([{"id": "a"}, {"id": "b"}], client.get_psa_trips("myvin"))
+        self.assertEqual({"client_id": "client", "pageToken": "tok2"},
+                         client.manager.get.call_args_list[1].kwargs["params"])
+        # a second ask within the cache time doesn't call psa again
+        self.assertEqual([{"id": "a"}, {"id": "b"}], client.get_psa_trips("myvin"))
+        self.assertEqual(2, client.manager.get.call_count)
+
+    def test_a_status_level_with_no_range_isnt_recorded(self):
+        electric = MagicMock(level=100, autonomy=0)
+        self.assertIsNone(PSAClient._position_level(electric))  # pylint: disable=protected-access
+        electric = MagicMock(level=5, autonomy=0)  # a real flat battery
+        self.assertEqual(5, PSAClient._position_level(electric))  # pylint: disable=protected-access
+        electric = MagicMock(level=100, autonomy=42)
+        self.assertEqual(100, PSAClient._position_level(electric))  # pylint: disable=protected-access
+
+    @patch("psa_car_controller.psacc.repository.db.Database.record_battery_reading")
+    def test_the_cars_battery_readings_are_recorded(self, record):
+        client = get_client()
+        client._record_enabled = True  # pylint: disable=protected-access
+        event = {"vin": "myvin", "date": "2026-09-23T09:05:16Z", "battery_level": 42, "autonomy": 17,
+                 "raw": {"charging_state": {"soc_batt": 42}}}
+        client._record_battery_event("vehicle", event)  # pylint: disable=protected-access
+        record.assert_called_once_with("myvin", datetime(2026, 9, 23, 9, 5, 16, tzinfo=timezone.utc), 42, 17)
+        # a level the plausibility filter replaced with the previous one isn't a reading
+        client._record_battery_event("vehicle", dict(event, battery_level=40))  # pylint: disable=protected-access
+        client._record_battery_event("command_result", event)  # pylint: disable=protected-access
+        self.assertEqual(1, record.call_count)
+
+    def test_event_listeners_get_every_event(self):
+        broker = EventBroker()
+        seen = []
+        broker.add_listener(lambda event_type, data: seen.append((event_type, data)))
+        broker.add_listener(lambda event_type, data: 1 / 0)  # a failing listener doesn't stop the others
+        broker.publish("vehicle", {"vin": "myvin"})
+        self.assertEqual([("vehicle", {"vin": "myvin"})], seen)
 
     def test_an_endpoint_which_doesnt_answer_gives_none(self):
         client = get_client()

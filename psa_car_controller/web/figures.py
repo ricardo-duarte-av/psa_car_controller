@@ -77,8 +77,11 @@ def get_figures(car: Car):
     style_cell_conditional = []
     if car.is_electric():
         style_cell_conditional.append({'if': {'column_id': 'consumption_fuel_km', }, 'display': 'None', })
+        style_cell_conditional.append({'if': {'column_id': 'consumption_fuel', }, 'display': 'None', })
     if car.is_thermal():
         style_cell_conditional.append({'if': {'column_id': 'consumption_km', }, 'display': 'None', })
+        for column_id in ('start_level', 'end_level'):
+            style_cell_conditional.append({'if': {'column_id': column_id, }, 'display': 'None', })
     table_fig = DataTable(
         id='trips-table',
         export_format=EXPORT_FORMAT,
@@ -102,6 +105,12 @@ def get_figures(car: Car):
                   'format': deepcopy(nb_format).symbol_suffix(" L/100km")},
                  {'id': 'distance', 'name': 'distance', 'type': 'numeric',
                   'format': nb_format.symbol_suffix(" km").precision(1)},
+                 {'id': 'start_level', 'name': 'battery start', 'type': 'numeric',
+                  'format': deepcopy(nb_format).symbol_suffix(" %").precision(0)},
+                 {'id': 'end_level', 'name': 'battery end', 'type': 'numeric',
+                  'format': deepcopy(nb_format).symbol_suffix(" %").precision(0)},
+                 {'id': 'consumption_fuel', 'name': 'fuel', 'type': 'numeric',
+                  'format': deepcopy(nb_format).symbol_suffix(" L").precision(2)},
                  {'id': 'mileage', 'name': 'mileage', 'type': 'numeric',
                   'format': nb_format},
                  {'id': 'altitude_diff', 'name': 'altitude diff', 'type': 'numeric',
@@ -224,6 +233,8 @@ def get_altitude_fig(trip: Trip):
     conn = Database.get_db()
     res = list(map(list, conn.execute("SELECT mileage, altitude FROM position WHERE Timestamp>=? and Timestamp<=?;",
                                       (trip.start_at, trip.end_at)).fetchall()))
+    if not res:  # psacc recorded nothing during a trip only psa saw
+        return html.Div("No altitude recorded during this trip")
     start_mileage = res[0][0]
     for line in res:
         line[0] = line[0] - start_mileage

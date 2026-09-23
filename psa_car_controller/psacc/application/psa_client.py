@@ -3,6 +3,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from json import JSONEncoder
 from hashlib import md5
+from urllib.parse import parse_qs, urlparse
 from sqlite3.dbapi2 import IntegrityError
 
 from oauth2_client.credentials_manager import ServiceInformation
@@ -27,6 +28,12 @@ from psa_car_controller.psacc.repository.db import Database
 from psa_car_controller.common.mylogger import CustomLogger
 
 SCOPE = ['openid profile']
+# With the battery flat the status api reports a range of 0 alongside a made-up level (100% on an
+# empty battery was seen). Real low levels also come with a range of 0, so only higher ones are
+# discarded.
+MAX_LEVEL_WITHOUT_RANGE = 10
+PSA_TRIPS_CACHE_TTL = timedelta(minutes=5)
+MAX_PSA_TRIPS_PAGES = 20
 CARS_FILE = "cars.json"
 DEFAULT_CONFIG_FILENAME = "config.json"
 
@@ -82,6 +89,8 @@ class PSAClient:
                                           self.vehicles_list,
                                           self.manager,
                                           remote_credentials)
+        self.remote_client.event_broker.add_listener(self._record_battery_event)
+        self._psa_trips_cache = {}  # vin -> (fetch date, trips)
 
     def get_app_name(self):
         return realm_info[self.realm]['app_name']
@@ -224,10 +233,49 @@ class PSAClient:
         car = self.vehicles_list.get_car_by_vin(vin)
         if car is None:
             return None
-        body = self._get_api("/user/vehicles/{}/trips".format(car.vehicle_id))
-        if body is None:
+        cached = self._psa_trips_cache.get(vin)
+        if cached is not None and datetime.now(timezone.utc) - cached[0] < PSA_TRIPS_CACHE_TTL:
+            return cached[1]
+        trips = []
+        params = None
+        for _ in range(MAX_PSA_TRIPS_PAGES):
+            body = self._get_api("/user/vehicles/{}/trips".format(car.vehicle_id), params=params)
+            if body is None:
+                return None
+            trips.extend((body.get("_embedded", None) or {}).get("trips", []))
+            page_token = self._next_page_token(body)
+            if page_token is None:
+                break
+            params = {"pageToken": page_token}
+        self._psa_trips_cache[vin] = (datetime.now(timezone.utc), trips)
+        return trips
+
+    @staticmethod
+    def _next_page_token(body):
+        href = ((body.get("_links", None) or {}).get("next", None) or {}).get("href", None)
+        if not href:
             return None
-        return (body.get("_embedded", None) or {}).get("trips", [])
+        return (parse_qs(urlparse(href).query).get("pageToken", None) or [None])[0]
+
+    def _record_battery_event(self, event_type, data):
+        """Keep the car's own battery readings, which trips prefer to the status api level."""
+        if event_type != "vehicle" or not self._record_enabled:
+            return
+        level = data.get("battery_level", None)
+        raw_level = ((data.get("raw", None) or {}).get("charging_state", None) or {}).get("soc_batt", None)
+        # a reading the plausibility filter replaced with the previous one isn't a reading
+        date = RemoteClient.parse_event_date(data.get("date", None))
+        if level is None or level != raw_level or date is None or data.get("vin", None) is None:
+            return
+        Database.record_battery_reading(data["vin"], date, level, data.get("autonomy", None))
+
+    @staticmethod
+    def _position_level(electric):
+        level = getattr(electric, "level", None)
+        if level is not None and level > MAX_LEVEL_WITHOUT_RANGE and getattr(electric, "autonomy", None) == 0:
+            logger.info("discard battery level %s%% reported with no range", level)
+            return None
+        return level
 
     def call_api(self, method, path, body=None, accept=PROBE_DEFAULT_ACCEPT):
         """Call any path of the psa api, and answer what it answered.
@@ -532,16 +580,17 @@ class PSAClient:
         logger.debug("vin:%s longitude:%s latitude:%s date:%s mileage:%s level:%s charge_date:%s level_fuel:"
                      "%s moving:%s temp:%s", car.vin, longitude, latitude, date, mileage, level, charge_date,
                      level_fuel, moving, temp)
+        position_level = self._position_level(car.status.get_energy('Electric'))
         if self._is_position_updated(car.vin, position_date):
-            Database.record_position(self.weather_api, car.vin, mileage, latitude, longitude, altitude, date, level,
-                                     level_fuel, moving, temp)
+            Database.record_position(self.weather_api, car.vin, mileage, latitude, longitude, altitude, date,
+                                     position_level, level_fuel, moving, temp)
             self._last_position_date[car.vin] = position_date
         else:
             # Still record the mileage and levels, which trips are built from, but not the stale
             # coordinates: a car whose gps stopped reporting would otherwise get no trips at all.
             logger.debug("position of %s wasn't updated since %s, recorded without it", car.vin, position_date)
-            Database.record_position(self.weather_api, car.vin, mileage, None, None, None, charge_date, level,
-                                     level_fuel, moving, temp)
+            Database.record_position(self.weather_api, car.vin, mileage, None, None, None, charge_date,
+                                     position_level, level_fuel, moving, temp)
         self.abrp.call(car, Database.get_last_temp(car.vin))
         if car.has_battery():
             electric_energy_status = car.status.get_energy('Electric')

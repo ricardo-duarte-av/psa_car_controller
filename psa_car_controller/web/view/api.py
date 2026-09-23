@@ -13,6 +13,7 @@ from psa_car_controller.psacc.model.car import Cars
 from psa_car_controller.psacc.repository.trips import Trips
 
 from psa_car_controller.psacc.application.charging import Charging
+from psa_car_controller.psacc.application.merged_trips import get_merged_trips
 from psa_car_controller.psa.push import (MONITOR_GROUPS, PushState, build_callback, build_monitor,
                                          monitors_path, webhook_url)
 
@@ -516,6 +517,20 @@ def get_trips():
         return jsonify(trips_as_dict)
     except (IndexError, TypeError, KeyError):
         logger.debug("Failed to get trips, there is probably not enough data yet:", exc_info=True)
+        return jsonify([])
+
+
+@app.route('/vehicles/<string:vin>/merged_trips')
+def get_vehicle_merged_trips(vin):
+    """The trips psa recorded, enriched with what psacc recorded during them (battery levels, route,
+    temperature), plus the ones only psacc saw. Oldest first."""
+    car = APP.myp.vehicles_list.get_car_by_vin(vin)
+    if car is None:
+        return jsonify({"error": "unknown vin"}), 404
+    try:
+        return jsonify(get_merged_trips(APP.myp, car).get_trips_as_dict())
+    except (IndexError, TypeError, KeyError):
+        logger.debug("Failed to get merged trips, there is probably not enough data yet:", exc_info=True)
         return jsonify([])
 
 

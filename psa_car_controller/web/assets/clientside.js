@@ -236,8 +236,10 @@ function sortMultipleTable (sortParams, data, tables) {
 
 function getLastPosition (trips) {
   const lastPos = {}
-  if (Array.isArray(trips) && trips.length > 0) {
-    const lastTrip = trips.reduce(function (prev, current) {
+  // trips psa recorded while the car's gps wasn't reporting have no position
+  const located = Array.isArray(trips) ? trips.filter(trip => trip.positions.lat.length > 0) : []
+  if (located.length > 0) {
+    const lastTrip = located.reduce(function (prev, current) {
       return (prev.start_at > current.start_at) ? prev : current
     })
     console.log('lastTrip:', lastTrip)
