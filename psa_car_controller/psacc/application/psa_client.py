@@ -58,7 +58,7 @@ class PSAClient:
         self.manager = OpenIdCredentialManager.create(self.service_information,
                                                       realm_info[self.realm]["scheme"], self.country_code)
         self.api_config = Oauth2PSACCApiConfig()
-        self.api_config.set_refresh_callback(self.manager.refresh_token_now)
+        self.api_config.set_refresh_callback(self._refresh_api_token)
         self.manager.refresh_token = refresh_token
         self.account_info = AccountInformation(client_id, customer_id, realm, country_code)
         self.remote_access_token = None
@@ -99,6 +99,15 @@ class PSAClient:
         self.api_config.access_token = self.manager.access_token
         api_instance = VehiclesApi(OauthAPIClient(self.api_config))
         return api_instance
+
+    def _refresh_api_token(self) -> bool:
+        """Renews the expired access token for the api calls, the one being retried included: they
+        read it from api_config, which api() only fills when a call starts. The retry going out with
+        the old token, which the refresh revokes, got "Invalid client id or secret"."""
+        if not self.manager.refresh_token_now():
+            return False
+        self.api_config.access_token = self.manager.access_token
+        return True
 
     # Read-only probe of the psa api itself (see docs/api/*.md, generated from psa's spec).
     # Most of those endpoints are marked "OUT OF 1ST RELEASE (R-LEV 1.1) SCOPE" and a car only

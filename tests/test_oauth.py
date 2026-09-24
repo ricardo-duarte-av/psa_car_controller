@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 
 from psa_car_controller.psa.connected_car_api.rest import ApiException
 from psa_car_controller.psa.oauth import Oauth2PSACCApiConfig, OauthAPIClient
+from tests.test_psa_probe import get_client
 
 
 def unauthorized():
@@ -45,6 +46,40 @@ class TestOauthAPIClient(unittest.TestCase):
         with self.assertRaises(ApiException):
             self.call()
         self.refresh.assert_not_called()
+
+
+class TestPSAClientTokenRefresh(unittest.TestCase):
+    def test_the_retry_sends_the_refreshed_token(self):
+        # 24/09/2026 15:56: the retry went out with the revoked token, "Invalid client id or secret"
+        client = get_client()
+        client.api_config = Oauth2PSACCApiConfig()
+        client.api_config.set_refresh_callback(client._refresh_api_token)  # pylint: disable=protected-access
+        client.manager.access_token = "old"
+
+        def refresh():
+            client.manager.access_token = "new"
+            return True
+        client.manager.refresh_token_now = refresh
+        api_client = client.api().api_client
+        sent = []
+
+        def call(*args, **kwargs):  # pylint: disable=unused-argument
+            sent.append(api_client.configuration.access_token)
+            if len(sent) == 1:
+                raise unauthorized()
+            return "vehicles"
+        api_client._ApiClient__call_api = call  # pylint: disable=protected-access
+
+        self.assertEqual("vehicles", api_client.call_api("/user/vehicles", "GET"))
+        self.assertEqual(["old", "new"], sent)
+
+    def test_a_failed_refresh_keeps_the_token(self):
+        client = get_client()
+        client.api_config = Oauth2PSACCApiConfig()
+        client.api_config.access_token = "old"
+        client.manager.refresh_token_now.return_value = False
+        self.assertFalse(client._refresh_api_token())  # pylint: disable=protected-access
+        self.assertEqual("old", client.api_config.access_token)
 
 
 if __name__ == '__main__':
