@@ -73,6 +73,35 @@ class TestPSAClientTokenRefresh(unittest.TestCase):
         self.assertEqual("vehicles", api_client.call_api("/user/vehicles", "GET"))
         self.assertEqual(["old", "new"], sent)
 
+    def test_the_retry_is_the_same_request_with_the_new_token(self):
+        # 24/09/2026 17:31, with 0.1.26: the retry carried the new token but the client_id twice,
+        # the generated client appending it to the caller's query list, and psa refused it
+        client = get_client()
+        client.api_config = Oauth2PSACCApiConfig()
+        client.api_config.api_key['client_id'] = "cid"
+        client.api_config.api_key['x-introspect-realm'] = "realm"
+        client.api_config.set_refresh_callback(client._refresh_api_token)  # pylint: disable=protected-access
+        client.manager.access_token = "old"
+
+        def refresh():
+            client.manager.access_token = "new"
+            return True
+        client.manager.refresh_token_now = refresh
+        api = client.api()
+        sent = []
+
+        def get(url, headers=None, query_params=None, **kwargs):  # pylint: disable=unused-argument
+            sent.append((headers["Authorization"], headers["x-introspect-realm"], list(query_params)))
+            if len(sent) == 1:
+                raise unauthorized()
+            raise StopIteration  # the second request is what's checked, not its answer
+        api.api_client.rest_client.GET = get
+
+        with self.assertRaises(StopIteration):
+            api.get_vehicle_status("vehicle")
+        self.assertEqual([("Bearer old", "realm", [("client_id", "cid")]),
+                          ("Bearer new", "realm", [("client_id", "cid")])], sent)
+
     def test_a_failed_refresh_keeps_the_token(self):
         client = get_client()
         client.api_config = Oauth2PSACCApiConfig()

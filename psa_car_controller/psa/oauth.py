@@ -102,7 +102,7 @@ class Oauth2PSACCApiConfig(connected_car_api.Configuration):
 
 
 class OauthAPIClient(ApiClient):
-    # pylint: disable=no-member,too-many-arguments,too-many-positional-arguments
+    # pylint: disable=no-member,too-many-arguments,too-many-positional-arguments,too-many-locals
     def call_api(self, resource_path, method,
                  path_params=None, query_params=None, header_params=None,
                  body=None, post_params=None, files=None,
@@ -111,18 +111,24 @@ class OauthAPIClient(ApiClient):
                  _preload_content=True, _request_timeout=None):
         _request_timeout = _request_timeout or TIMEOUT_IN_S
         for attempt in range(0, 2):
+            # The generated client adds the auth to the query and headers it's given, in place: a
+            # retry sent the client_id twice, which psa refuses ("Invalid client id or secret").
+            path = dict(path_params) if path_params is not None else None
+            query = list(query_params) if query_params is not None else None
+            headers = dict(header_params) if header_params is not None else None
+            post = list(post_params) if post_params is not None else None
             try:
                 if not async_req:
                     return self._ApiClient__call_api(resource_path, method,
-                                                     path_params, query_params, header_params,
-                                                     body, post_params, files,
+                                                     path, query, headers,
+                                                     body, post, files,
                                                      response_type, auth_settings,
                                                      _return_http_data_only, collection_formats,
                                                      _preload_content, _request_timeout)
                 return self.pool.apply_async(self.__call_api, (resource_path,
-                                                               method, path_params, query_params,
-                                                               header_params, body,
-                                                               post_params, files,
+                                                               method, path, query,
+                                                               headers, body,
+                                                               post, files,
                                                                response_type, auth_settings,
                                                                _return_http_data_only,
                                                                collection_formats,
