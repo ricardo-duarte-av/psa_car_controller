@@ -130,4 +130,5 @@ class OauthAPIClient(ApiClient):
             except ApiException as e:
                 if attempt == 1 or e.reason != 'Unauthorized' or not self.configuration.refresh_callback():
                     raise e
-            return None
+                # the token expired and was refreshed: the second attempt uses the new one
+        return None
