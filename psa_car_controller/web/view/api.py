@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 
 from flask import jsonify, request, Response as FlaskResponse
 from pydantic import BaseModel
@@ -14,6 +15,7 @@ from psa_car_controller.psacc.model.car import Cars
 from psa_car_controller.psacc.repository.trips import Trips
 
 from psa_car_controller.psacc.application.charging import Charging
+from psa_car_controller.psacc.model.charge import ChargePlace
 from psa_car_controller.psacc.application.merged_trips import get_merged_trips
 from psa_car_controller.psa.push import (MONITOR_GROUPS, PushState, build_callback, build_monitor,
                                          monitors_path, webhook_url)
@@ -550,6 +552,45 @@ def get_chargings():
     except (IndexError, TypeError):
         logger.debug("Failed to get chargings, there is probably not enough data yet:", exc_info=True)
         return jsonify([])
+
+
+@app.route('/vehicles/<string:vin>/chargings', methods=['PATCH'])
+def edit_charging(vin):
+    """Set by hand what psacc can't know about a finished charge.
+
+    The json body names the charge by its "start_at" (iso 8601) and may hold "place" (home, work or
+    public), "metered_kw" (the kWh the charger billed) and "price" (the real total). A key left out is
+    kept, a null clears it; a cleared price is estimated again. Answers the charge as /vehicles/chargings does.
+    """
+    car = APP.myp.vehicles_list.get_car_by_vin(vin)
+    if car is None:
+        return jsonify({"error": "unknown vin"}), 404
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "a json object is expected"}), 400
+    try:
+        start_at = datetime.fromisoformat(str(body.get("start_at")))
+    except ValueError:
+        return jsonify({"error": "start_at must be an iso 8601 date"}), 400
+    start_at = start_at.replace(tzinfo=timezone.utc) if start_at.tzinfo is None else start_at.astimezone(timezone.utc)
+    changes = {}
+    if "place" in body:
+        if body["place"] not in [None] + [place.value for place in ChargePlace]:
+            return jsonify({"error": "place must be home, work or public"}), 400
+        changes["place"] = body["place"]
+    for key in ("metered_kw", "price"):
+        if key in body:
+            value = body[key]
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0):
+                return jsonify({"error": f"{key} must be a positive number or null"}), 400
+            changes[key] = value
+    try:
+        charge = Charging.edit_charge(car, start_at, changes)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
+    if charge is None:
+        return jsonify({"error": "unknown charge"}), 404
+    return jsonify(charge)
 
 
 @app.route('/settings')

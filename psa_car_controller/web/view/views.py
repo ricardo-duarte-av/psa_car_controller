@@ -140,6 +140,7 @@ def create_callback():  # noqa: MC0001
                     conn = Database.get_db()
                     charge = Charge(datetime.utcfromtimestamp(changed_line['start_at'] / 1000))
                     charge.price = changed_line['current_value']
+                    charge.price_manual = charge.price is not None
                     if APP.myp.vehicles_list:
                         charge.vin = get_default_car().vin
                     if not Database.set_chargings_price(conn, charge):

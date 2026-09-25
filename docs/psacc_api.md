@@ -67,6 +67,21 @@ These links will work only if PSACC is on your computer, if it isn't please repl
    
    http://localhost:5000/vehicles/chargings
 
+   Each session has a `place` (`home`, `work` or `public`, `home` unless set), the `metered_kw` the charger
+   billed (null unless set) and `price_manual` (the price was set by hand). `kw` stays the estimate from the
+   battery levels.
+
+   Set by hand what psacc can't know about a finished session, e.g. the real bill of a public charger:
+
+   ```
+   curl -X PATCH http://localhost:5000/vehicles/YOURVIN/chargings -H 'Content-Type: application/json' \
+        -d '{"start_at": "2026-09-25T08:32:30Z", "place": "public", "metered_kw": 8.67, "price": 10.26}'
+   ```
+
+   `start_at` names the session. A key left out is kept and a null clears it. A price set by hand is never
+   estimated again; clear it to go back to the estimate, which uses `metered_kw` when set and is free at work.
+   Answers the session as listed above, 404 for an unknown session and 409 for one still in progress.
+
 17. Get the vehicle trips:
    
    http://localhost:5000/vehicles/trips

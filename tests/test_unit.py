@@ -312,7 +312,10 @@ class TestUnit(unittest.TestCase):
                                          'kw': 20.7,
                                          'price': 4.29,
                                          'charging_mode': 'slow',
-                                         'mileage': 123456789.1}])
+                                         'mileage': 123456789.1,
+                                         'place': 'home',
+                                         'metered_kw': None,
+                                         'price_manual': False}])
         assert get_figures(car)
         row = {"start_at": date0.strftime('%Y-%m-%dT%H:%M:%S.000Z'),
                "stop_at": date3.strftime('%Y-%m-%dT%H:%M:%S.000Z'), "start_level": start_level, "end_level": end_level}

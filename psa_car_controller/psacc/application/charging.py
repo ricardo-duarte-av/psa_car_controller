@@ -10,7 +10,7 @@ from .ecomix import Ecomix
 from psa_car_controller.psacc.repository.config_repository import ElectricityPriceConfig
 from psa_car_controller.psacc.repository.db import Database
 from ..model.car import Car, Cars
-from ..model.charge import Charge
+from ..model.charge import Charge, ChargePlace, ChargingMode
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,34 @@ class Charging:
         return charge_list
 
     @staticmethod
+    def edit_charge(car: Car, start_at: datetime, changes: dict):
+        """Apply what was set by hand on a finished charge and return it as get_chargings does, None when unknown.
+
+        changes may hold "place" (home, work or public, None is home), "metered_kw" (the kWh the charger
+        billed) and "price" (the real total); a key left out is kept, a None clears it, and a cleared
+        price is estimated again.
+        """
+        conn = Database.get_db()
+        charge = Database.get_charge(car.vin, start_at)
+        if charge is None:
+            return None
+        if charge.stop_at is None:
+            raise ValueError("the charge is still in progress")
+        if "place" in changes:
+            charge.place = ChargePlace(changes["place"]) if changes["place"] else ChargePlace.HOME
+        if "metered_kw" in changes:
+            charge.metered_kw = changes["metered_kw"]
+        if "price" in changes:
+            charge.price = changes["price"]
+            charge.price_manual = changes["price"] is not None
+        if not charge.price_manual:
+            Charging.set_charge_price(charge, conn, car)
+        Database.set_charge_details(conn, charge)
+        conn.close()
+        return next((c for c in Charging.get_chargings()
+                     if c["start_at"] == charge.start_at and c["VIN"] == charge.vin), None)
+
+    @staticmethod
     def get_battery_curve(conn, charge, car) -> List[BatteryChargeCurve]:
         battery_curves_dto = Database.get_battery_curve(conn, charge.start_at, charge.stop_at, charge.vin)
         battery_curves = BatteryChargeCurve.dto_to_battery_curve(car, charge, battery_curves_dto)
@@ -33,6 +61,8 @@ class Charging:
 
     @staticmethod
     def set_charge_price(charge, conn, car):
+        if charge.price_manual:
+            return
         battery_curves = Charging.get_battery_curve(conn, charge, car)
         charge.price = Charging.elec_price.get_price(charge, battery_curves)
 
@@ -79,6 +109,9 @@ class Charging:
                 start_at = charge_date
             else:
                 start_at = last_charge.start_at
+                # the api can say "No" or nothing at the charge start, keep the first real mode it gives
+                if last_charge.charging_mode == ChargingMode.UNKNOWN and ChargingMode.is_known(charging_mode):
+                    Database.set_charging_mode(conn, car.vin, start_at, charging_mode)
                 # the api can give a stale level at the charge start (100 on a nearly empty battery), and
                 # a charge only raises the level: a lower reading is the real start. Left as is, the stale
                 # start_level makes the whole charge look like a little one, which clean_battery deletes.
@@ -123,3 +156,5 @@ class Charging:
                         "duration_str": str((c.get("stop_at") - c.get("start_at"))),
                     }
                 )
+            c["place"] = c.get("place") or ChargePlace.HOME.value
+            c["price_manual"] = bool(c.get("price_manual"))

@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from typing import List
 
 from psa_car_controller.psacc.application.battery_charge_curve import BatteryChargeCurve
-from psa_car_controller.psacc.model.charge import Charge
+from psa_car_controller.psacc.model.charge import Charge, ChargePlace, ChargingMode
 
 logger = logging.getLogger(__name__)
 
@@ -123,12 +123,12 @@ class ElectricityPriceConfig(BaseModel):
 
     def _get_dc_charge_price(self, charge: Charge, battery_charge_curves: List[BatteryChargeCurve]):
         max_consumption = sum(battery_charge_curve.speed for battery_charge_curve in battery_charge_curves)
-        total_consumption = charge.kw
+        total_consumption = charge.metered_kw if charge.metered_kw is not None else charge.kw
         if self.high_speed_dc_charge_threshold and max_consumption > self.high_speed_dc_charge_threshold:
             return self.high_speed_dc_charge_price * total_consumption
         return self.dc_charge_price * total_consumption
 
-    def _get_ac_charge_price(self, start, end, consumption):
+    def _get_ac_charge_price(self, start, end, consumption, efficiency):
         prices = []
         date = start
         res = None
@@ -137,7 +137,7 @@ class ElectricityPriceConfig(BaseModel):
                 prices.append(self.get_instant_price(date))
                 date = date + timedelta(minutes=30)
             try:
-                res = round(consumption * mean(prices) / self.charger_efficiency, 2)
+                res = round(consumption * mean(prices) / efficiency, 2)
             except StatisticsError as e:
                 logger.error("Can't get_price of charge: %s-%s prices: %s", start, end, prices, exc_info=e)
             except TypeError as e:
@@ -145,9 +145,14 @@ class ElectricityPriceConfig(BaseModel):
         return res
 
     def get_price(self, charge: Charge, battery_charge_curves: List[BatteryChargeCurve]):
-        if charge.charging_mode.DC and self.dc_charge_price:
+        if charge.place == ChargePlace.WORK:
+            return 0
+        if charge.charging_mode == ChargingMode.DC and self.dc_charge_price:
             return self._get_dc_charge_price(charge, battery_charge_curves)
-        return self._get_ac_charge_price(charge.start_at, charge.stop_at, charge.kw)
+        if charge.metered_kw is not None:
+            # the charger's meter already counts the charger losses
+            return self._get_ac_charge_price(charge.start_at, charge.stop_at, charge.metered_kw, 1)
+        return self._get_ac_charge_price(charge.start_at, charge.stop_at, charge.kw, self.charger_efficiency)
 
     def is_enable(self):
         return self.day_price is not None

@@ -19,7 +19,8 @@ from psa_car_controller.psacc.utils.utils import get_temp
 
 logger = logging.getLogger(__name__)
 
-NEW_BATTERY_COLUMNS = [["price", "INTEGER"], ["charging_mode", "TEXT"], ["mileage", "REAL"]]
+NEW_BATTERY_COLUMNS = [["price", "INTEGER"], ["charging_mode", "TEXT"], ["mileage", "REAL"], ["place", "TEXT"],
+                       ["metered_kw", "REAL"], ["price_manual", "BOOLEAN"]]
 NEW_POSITION_COLUMNS = [["level_fuel", "INTEGER"], ["altitude", "INTEGER"]]
 NEW_BATTERY_CURVE_COLUMNS = [["rate", "INTEGER"], ["autonomy", "INTEGER"]]
 
@@ -266,12 +267,26 @@ class Database:
 
     @staticmethod
     def set_chargings_price(conn, charge: Charge):
-        update = conn.execute("UPDATE battery SET price=? WHERE start_at=? AND VIN=?",
-                              (charge.price, charge.start_at, charge.vin)).rowcount
+        update = conn.execute("UPDATE battery SET price=?, price_manual=? WHERE start_at=? AND VIN=?",
+                              (charge.price, charge.price_manual, charge.start_at, charge.vin)).rowcount
         conn.commit()
         if update == 0:
             logger.error("Can't find line to update in the database")
         return update
+
+    @staticmethod
+    def set_charge_details(conn, charge: Charge):
+        """Store what was set by hand on a charge: its place, the kWh the charger billed and its price."""
+        update = conn.execute("UPDATE battery SET place=?, metered_kw=?, price=?, price_manual=? "
+                              "WHERE start_at=? AND VIN=?",
+                              (charge.place.value, charge.metered_kw, charge.price, charge.price_manual,
+                               charge.start_at, charge.vin)).rowcount
+        conn.commit()
+        return update
+
+    @staticmethod
+    def set_charging_mode(conn, vin, start_at, charging_mode):
+        conn.execute("UPDATE battery SET charging_mode=? WHERE start_at=? AND VIN=?", (charging_mode, start_at, vin))
 
     @staticmethod
     def get_battery_curve(conn, start_at, stop_at, vin):
