@@ -4,9 +4,19 @@ Unlike the connectedcar api the rest of psacc uses, this backend needs mutual TL
 cert the setup already extracts, certs/*.pem) and its own token, obtained from the account
 password through the same GetAccessToken flow the setup runs (see psa/setup/app_decoder.py). The
 bta endpoints answer only to POST (checked: they return 405 "Allow: POST" to anything else).
+
+The call shape is the official app's (its BaseRestAPI, read from the apk): the body is only the site
+code and the ticket, the culture is a query parameter of every call, and trips takes "from" and "to"
+query parameters in epoch milliseconds:
+    POST .../contracts/bta/trips?culture=&from=&to=     the trips
+    POST .../contracts/bta/trips/<id>?culture=          the positions of one trip
+    POST .../contracts/bta/lastposition?culture=
+    POST .../contracts/bta/data?culture=
+    POST .../contracts/bta/alerts?culture=&state=
 """
 import json
 import logging
+from datetime import datetime, timezone
 
 import requests
 
@@ -30,6 +40,21 @@ BTA_HOST = "https://mw-{brand}-rp.mym.awsmpsa.com"
 APP_VERSION = "1.55.0"
 CERT = ("certs/public.pem", "certs/private.pem")
 
+# the period a trips read covers when none is given
+BTA_DEFAULT_PERIOD_MS = 30 * 24 * 3600 * 1000
+
+
+def bta_time(value) -> int:
+    """A bta "from"/"to": epoch milliseconds as the app sends them, from milliseconds or an iso date."""
+    if isinstance(value, bool):
+        raise ValueError(value)
+    if isinstance(value, (int, float)) or str(value).isdigit():
+        return int(value)
+    date = datetime.fromisoformat(str(value))
+    if date.tzinfo is None:
+        date = date.replace(tzinfo=timezone.utc)
+    return int(date.timestamp() * 1000)
+
 
 class MymError(Exception):
     pass
@@ -43,7 +68,7 @@ class MymClient:
         self.country_code = country_code
         self.version = version
         self.site_code = "{}_{}_ESP".format(brand_code, country_code)
-        # the backend wants a culture on the bta body; language usually matches the country for
+        # every bta call takes a culture query parameter; language usually matches the country for
         # these accounts (pt_PT, fr_FR), overridable from the request when it doesn't.
         self.culture = "{}_{}".format((country_code or "").lower(), country_code)
         self.token = None
@@ -71,25 +96,29 @@ class MymClient:
     def _host(self):
         return BTA_HOST.replace("{brand}", self.brand_code.lower())
 
-    def post_bta(self, vin, path, extra=None):
+    def post_bta(self, vin, path, extra=None, query=None):
         """POST a bta path with the cert and the token.
 
-        The body carries the site code, the ticket and the culture the backend requires; [extra]
-        merges in any other field (and can override these), so the exact read shape can be found
-        without changing this code.
+        The body carries the site code and the ticket, the query the culture; [extra] merges other
+        fields into the body and [query] other query parameters (both can override these), so a read
+        shape the app doesn't show can still be tried without changing this code.
         """
         if self.token is None:
             raise MymError("no token, call get_token first")
         url = "{}/api/v1/user/vehicles/{}/contracts/bta/{}".format(self._host(), vin, path.strip("/"))
-        payload = {"siteCode": self.site_code, "ticket": self.token, "culture": self.culture}
+        payload = {"siteCode": self.site_code, "ticket": self.token}
         if extra:
             payload.update(extra)
+        params = {"culture": self.culture}
+        if query:
+            params.update(query)
         try:
             res = requests.post(
                 url,
-                headers={"Accept": "application/json", "Content-Type": "application/json",
+                headers={"Accept": "application/json", "Content-Type": "application/json;charset=UTF-8",
                          "Token": self.token, "Source-Agent": "App-Android",
                          "User-Agent": "okhttp/4.8.0", "Version": self.version},
+                params=params,
                 data=json.dumps(payload),
                 cert=CERT,
                 timeout=TIMEOUT_IN_S)

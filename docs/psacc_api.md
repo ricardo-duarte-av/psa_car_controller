@@ -261,7 +261,14 @@ used in `source` and when the position was taken in `updated_at`.
     once from the psa account password (the same GetAccessToken flow as the setup) and kept in
     memory; the password itself is not stored. Afterwards no password is needed until restart.
 
-    Defaults to the (safe) last position. `?path=trips` and an optional json `body` allow reading
-    the other bta resources. Those endpoints answer only to POST (Allow: POST), so this posts with
-    the cert and the token.
+    Defaults to the (safe) last position. Every bta endpoint answers only to POST (Allow: POST), so
+    this posts with the cert and the token, the way the official app does: the body is the site code
+    and the ticket, the culture (`?culture=`, `pt_PT` style by default) is a query parameter.
+
+    - `?path=trips&from=...&to=...`: the trips of a period, `from`/`to` in epoch milliseconds or iso
+      8601 dates (the last 30 days by default)
+    - `?path=trips/<id>`: the positions of one trip
+    - `?path=data`, `?path=alerts` (with `"query": {"state": ...}`): the other bta resources
+
+    A json `body` adds fields to the request body and `query` query parameters.
 

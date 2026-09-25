@@ -17,6 +17,7 @@ from psa_car_controller.psacc.repository.trips import Trips
 from psa_car_controller.psacc.application.charging import Charging
 from psa_car_controller.psacc.model.charge import ChargePlace
 from psa_car_controller.psacc.application.merged_trips import get_merged_trips
+from psa_car_controller.psa.mym import BTA_DEFAULT_PERIOD_MS, bta_time
 from psa_car_controller.psa.push import (MONITOR_GROUPS, PushState, build_callback, build_monitor,
                                          monitors_path, webhook_url)
 
@@ -333,8 +334,9 @@ def psa_bta_fetch():
 
     Needs the psa account password once (?password= or a json body {"password": ...}) to obtain the
     mym token, which is kept in memory and reused; the password isn't stored. Defaults to the safe
-    lastposition; ?path= and an optional json "body" allow finding the exact read shape of the trips
-    without another build. Everything it POSTs carries the client cert and the token.
+    lastposition; ?path=trips reads the trips of ?from= to ?to= (epoch ms or iso dates, the last 30
+    days by default) and ?path=trips/<id> the positions of one. A json "body" adds fields to the
+    body and "query" query parameters. Everything it POSTs carries the client cert and the token.
     """
     payload = request.get_json(silent=True) or {}
     password = request.args.get('password', None) or payload.get('password', None)
@@ -361,16 +363,31 @@ def psa_bta_fetch():
             return jsonify({"error": "couldn't obtain the mym token: " + str(e)}), 502
         _MYM["client"] = client
 
-    extra = {}
-    if isinstance(body, dict):
-        extra.update(body)
     culture = request.args.get('culture', None) or payload.get('culture', None)
     if culture:
-        extra["culture"] = culture
-    if culture:
         client.culture = culture
-    answer, status = client.post_bta(car.vin, path, extra=extra or None)
-    return jsonify({"path": path, "culture": client.culture, "answer": answer, "status": status}), 200
+    try:
+        query = bta_query(path, payload)
+    except ValueError:
+        return jsonify({"error": "from and to are epoch milliseconds or iso 8601 dates"}), 400
+    answer, status = client.post_bta(car.vin, path, extra=body if isinstance(body, dict) else None,
+                                     query=query or None)
+    return jsonify({"path": path, "culture": client.culture, "query": query, "answer": answer,
+                    "status": status}), 200
+
+
+def bta_query(path, payload) -> dict:
+    """The query parameters of a bta read besides the culture: the json "query", and "from" and "to"."""
+    query = dict(payload.get('query', None) or {})
+    for key in ("from", "to"):
+        value = request.args.get(key, None) or payload.get(key, None)
+        if value is not None:
+            query[key] = bta_time(value)
+    if path.strip("/") == "trips":
+        # the app always asks trips for a period; default to the last 30 days
+        query.setdefault("to", int(time() * 1000))
+        query.setdefault("from", query["to"] - BTA_DEFAULT_PERIOD_MS)
+    return query
 
 
 @app.route('/psa/bta/probe')
